@@ -1,0 +1,215 @@
+{
+  "equationVersion": "ccoverT-1.0.0",
+  "modelVersion": "ccoverT-paper-implementation",
+  "modelConfigVersion": "fixture-1",
+  "requestId": "fixture-request-1",
+  "profile": "paper",
+  "isDemo": false,
+  "isScenario": false,
+  "targetMeasure": "%LCC (HC+SC)",
+  "studyAreaId": "puerto-princesa-city",
+  "studyAreaLabel": "Puerto Princesa City, Palawan, Philippines",
+  "scope": "citywide-annual-average",
+  "baselineYear": 2006,
+  "horizonYears": 2,
+  "initialCoverPercent": 57.25,
+  "finalCoverPercent": 56.86424609621262,
+  "finalIntervalMeanPercent": 56.96225350105529,
+  "stateClassification": "Good",
+  "meanClassification": "Good",
+  "classificationConvention": "provisional-gap-free-v1",
+  "classificationConventionSource": "Application convention. The paper's condition categories disagree at 75% cover, so this gap-free convention is used and displayed with its source.",
+  "annual": [
+    {
+      "year": 2007,
+      "tYears": 1.0,
+      "coverStartPercent": 57.25,
+      "coverEndPercent": 57.059478,
+      "coverIntervalMeanPercent": 57.155128,
+      "temperatureStartC": 30.19,
+      "temperatureEndC": 30.203,
+      "tourismStartArrivals": 147806.0,
+      "tourismEndArrivals": 150791.8793,
+      "growthRateMean": 0.293659,
+      "thermalRateMean": -0.0,
+      "tourismRateMean": -0.484181,
+      "growthContributionPp": 0.293659,
+      "thermalContributionPp": -0.0,
+      "tourismContributionPp": -0.484181,
+      "stateClassification": "Good",
+      "meanClassification": "Good"
+    },
+    {
+      "year": 2008,
+      "tYears": 2.0,
+      "coverStartPercent": 57.059478,
+      "coverEndPercent": 56.864246,
+      "coverIntervalMeanPercent": 56.962254,
+      "temperatureStartC": 30.203,
+      "temperatureEndC": 30.216,
+      "tourismStartArrivals": 150791.8793,
+      "tourismEndArrivals": 153838.0773,
+      "growthRateMean": 0.297062,
+      "thermalRateMean": -0.0,
+      "tourismRateMean": -0.492295,
+      "growthContributionPp": 0.297062,
+      "thermalContributionPp": -0.0,
+      "tourismContributionPp": -0.492295,
+      "stateClassification": "Good",
+      "meanClassification": "Good"
+    }
+  ],
+  "parameters": [
+    {
+      "key": "r",
+      "symbol": "r",
+      "value": 0.028,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    },
+    {
+      "key": "alpha",
+      "symbol": "alpha",
+      "value": 0.05,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    },
+    {
+      "key": "beta",
+      "symbol": "beta",
+      "value": 5.6743e-08,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    },
+    {
+      "key": "gamma",
+      "symbol": "gamma",
+      "value": 0.013,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    },
+    {
+      "key": "T0",
+      "symbol": "T0",
+      "value": 30.19,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    },
+    {
+      "key": "Tcrit",
+      "symbol": "Tcrit",
+      "value": 31.0,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    },
+    {
+      "key": "V0",
+      "symbol": "V0",
+      "value": 147806.0,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    },
+    {
+      "key": "g",
+      "symbol": "g",
+      "value": 0.02,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    },
+    {
+      "key": "K",
+      "symbol": "K",
+      "value": 70.0,
+      "unit": "unit",
+      "status": "reported",
+      "provenance": "fixture",
+      "reviewStatus": "reviewed",
+      "sourceDatasetId": null,
+      "effectiveDate": null
+    }
+  ],
+  "solver": {
+    "method": "rk4",
+    "substepsPerYear": 12,
+    "intervalMeanQuadrature": "trapezoid",
+    "stateOutput": "end-of-year",
+    "notes": "The paper does not identify a numerical solver or define within-year averaging. This run used classical fourth-order Runge-Kutta with a fixed substep per year and reports both the end-of-year state and the trapezoidal interval mean of live coral cover."
+  },
+  "sources": [
+    {
+      "name": "coralBaseline",
+      "source": "Fixture survey",
+      "unit": "percent",
+      "timeWindow": "2006",
+      "coverage": null,
+      "scope": null,
+      "datasetId": null,
+      "retrievedAt": null
+    }
+  ],
+  "warnings": [
+    "With the configured baseline year, T0, gamma and Tcrit, sea-surface temperature only reaches Tcrit around year 2068, so the thermal term alpha*max(0, T(t) - Tcrit)*C is inactive across this whole horizon and alpha does not affect these results.",
+    "Provisional parameter: K = 70 is a provisional value recovered from the handwritten Appendix C calculation and is not independently verified.",
+    "Provisional parameter: beta = 5.6743e-8 is a provisional value recovered from the handwritten Appendix C calculation; its units are unclear in the paper.",
+    "The paper does not identify a numerical solver or define within-year averaging. This run used classical fourth-order Runge-Kutta with a fixed substep per year and reports both the end-of-year state and the trapezoidal interval mean of live coral cover."
+  ],
+  "conditions": [
+    {
+      "label": "Poor",
+      "minPercent": 0.0,
+      "maxPercent": 25.0,
+      "upperInclusive": false
+    },
+    {
+      "label": "Fair",
+      "minPercent": 25.0,
+      "maxPercent": 50.0,
+      "upperInclusive": false
+    },
+    {
+      "label": "Good",
+      "minPercent": 50.0,
+      "maxPercent": 75.0,
+      "upperInclusive": false
+    },
+    {
+      "label": "Excellent",
+      "minPercent": 75.0,
+      "maxPercent": 100.0,
+      "upperInclusive": true
+    }
+  ],
+  "missingParameters": []
+}

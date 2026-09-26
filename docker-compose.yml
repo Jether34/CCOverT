@@ -1,0 +1,120 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  model:
+    build:
+      context: .
+      dockerfile: services/model-api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      MODEL_SERVICE_TOKEN: ${MODEL_SERVICE_TOKEN:?MODEL_SERVICE_TOKEN must be set}
+      MODEL_ALLOW_DEMO_PROFILE: ${MODEL_ALLOW_DEMO_PROFILE:-true}
+    expose:
+      - "8000"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    environment:
+      MP_MAX_MESSAGES: "500"
+    networks:
+      - edge
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      model:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: "4000"
+      WEB_ORIGIN: ${DOCKER_WEB_ORIGIN:-http://localhost:8080}
+      APP_URL: ${DOCKER_APP_URL:-http://localhost:8080}
+      MONGODB_URI: mongodb://mongo:27017/ccover_t
+      USE_MEMORY_DB: "false"
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: "true"
+      DEV_VERIFICATION_ENABLED: ${DEV_VERIFICATION_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      MODEL_SERVICE_URL: http://model:8000
+      MODEL_SERVICE_TOKEN: ${MODEL_SERVICE_TOKEN:?MODEL_SERVICE_TOKEN must be set}
+      ALLOW_DEMO_PROFILE: ${ALLOW_DEMO_PROFILE:-true}
+      MODEL_ALLOW_DEMO_PROFILE: ${ALLOW_DEMO_PROFILE:-true}
+      AI_PROVIDER: ${AI_PROVIDER:-disabled}
+      AI_PROVIDER_URL: ${AI_PROVIDER_URL:-}
+      AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:-}
+      AI_PROVIDER_MODEL: ${AI_PROVIDER_MODEL:-}
+      ENVIRONMENTAL_PROVIDER: ${ENVIRONMENTAL_PROVIDER:-disabled}
+      ENVIRONMENTAL_PROVIDER_URL: ${ENVIRONMENTAL_PROVIDER_URL:-}
+      ENVIRONMENTAL_PROVIDER_API_KEY: ${ENVIRONMENTAL_PROVIDER_API_KEY:-}
+      REEF_STATIONS_JSON: ${REEF_STATIONS_JSON:-}
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-5242880}
+      DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-365}
+    expose:
+      - "4000"
+    networks:
+      - edge
+      - backend
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo_data:
+
+networks:
+  edge:
+  backend:
+    internal: true

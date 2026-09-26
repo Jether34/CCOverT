@@ -1,0 +1,239 @@
+{
+  "equationVersion": "ccoverT-1.0.0",
+  "modelVersion": "ccoverT-paper-implementation",
+  "equations": {
+    "coralCover": "dC/dt = r*C*(1 - C/K) - alpha*max(0, T(t) - Tcrit)*C - beta*V(t)*C",
+    "temperature": "T(t) = T0 + gamma*t",
+    "tourism": "V(t) = V0*exp(g*t)"
+  },
+  "requiredParameters": [
+    "r",
+    "alpha",
+    "beta",
+    "gamma",
+    "T0",
+    "Tcrit",
+    "V0",
+    "g",
+    "K"
+  ],
+  "parameters": [
+    {
+      "key": "r",
+      "symbol": "r",
+      "value": 0.028,
+      "unit": "per year",
+      "status": "reported",
+      "description": "Intrinsic coral-cover growth rate.",
+      "provenance": "CCOverT paper, model parameter table.",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": ""
+    },
+    {
+      "key": "alpha",
+      "symbol": "alpha",
+      "value": null,
+      "unit": "per degree Celsius per year",
+      "status": "unspecified-in-paper",
+      "description": "Thermal stress sensitivity. The paper does not numerically specify alpha; it is required by the equation and must be supplied by an authorised researcher with documented provenance.",
+      "provenance": "Not numerically specified in the available paper text.",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": "Required. The service refuses to substitute zero."
+    },
+    {
+      "key": "beta",
+      "symbol": "beta",
+      "value": 5.6743e-08,
+      "unit": "unclear in the paper (per tourist arrival per year, inferred)",
+      "status": "provisional",
+      "description": "Tourism-pressure sensitivity.",
+      "provenance": "CCOverT paper, handwritten Appendix C calculation.",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": "Provisional: value and units still require verification by a researcher."
+    },
+    {
+      "key": "gamma",
+      "symbol": "gamma",
+      "value": 0.013,
+      "unit": "degrees Celsius per year",
+      "status": "reported",
+      "description": "Linear sea-surface-temperature trend.",
+      "provenance": "CCOverT paper, model parameter table.",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": "T(t) must be sea-surface temperature; air temperature is not a substitute."
+    },
+    {
+      "key": "T0",
+      "symbol": "T0",
+      "value": 30.19,
+      "unit": "degrees Celsius",
+      "status": "reported",
+      "description": "Sea-surface temperature at the baseline year (t = 0).",
+      "provenance": "CCOverT paper, model parameter table.",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": "Confirm that the paper source for T0 is sea-surface temperature."
+    },
+    {
+      "key": "Tcrit",
+      "symbol": "Tcrit",
+      "value": 31.0,
+      "unit": "degrees Celsius",
+      "status": "reported",
+      "description": "Critical sea-surface-temperature threshold.",
+      "provenance": "CCOverT paper, model parameter table.",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": ""
+    },
+    {
+      "key": "V0",
+      "symbol": "V0",
+      "value": 147806.0,
+      "unit": "tourist arrivals per year",
+      "status": "reported",
+      "description": "Annual tourist arrivals at the baseline year.",
+      "provenance": "CCOverT paper, model parameter table (baseline year 2006).",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": "Confirm the study-area coverage of this citywide arrival count."
+    },
+    {
+      "key": "g",
+      "symbol": "g",
+      "value": null,
+      "unit": "per year",
+      "status": "unspecified-in-paper",
+      "description": "Continuous growth rate of annual tourist arrivals in V(t) = V0*exp(g*t).",
+      "provenance": "Not numerically specified in the available paper text.",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": "Required. Estimate only from a verified annual tourism series and record that series as the source."
+    },
+    {
+      "key": "K",
+      "symbol": "K",
+      "value": 70.0,
+      "unit": "coral-cover percentage points",
+      "status": "provisional",
+      "description": "Carrying capacity of live coral cover.",
+      "provenance": "CCOverT paper, handwritten Appendix C calculation.",
+      "reviewStatus": "unreviewed",
+      "effectiveDate": null,
+      "notes": "Provisional: must use the same 0-100 percentage-point scale as C."
+    }
+  ],
+  "provisionalParameters": [
+    "K",
+    "beta"
+  ],
+  "conditionConvention": {
+    "id": "provisional-gap-free-v1",
+    "label": "Provisional gap-free condition convention",
+    "source": "Application convention. The paper's condition categories disagree at 75% cover, so this gap-free convention is used and displayed with its source.",
+    "bands": [
+      {
+        "label": "Poor",
+        "minPercent": 0.0,
+        "maxPercent": 25.0,
+        "upperInclusive": false
+      },
+      {
+        "label": "Fair",
+        "minPercent": 25.0,
+        "maxPercent": 50.0,
+        "upperInclusive": false
+      },
+      {
+        "label": "Good",
+        "minPercent": 50.0,
+        "maxPercent": 75.0,
+        "upperInclusive": false
+      },
+      {
+        "label": "Excellent",
+        "minPercent": 75.0,
+        "maxPercent": 100.0,
+        "upperInclusive": true
+      }
+    ]
+  },
+  "solver": {
+    "method": "rk4",
+    "substepsPerYear": 12,
+    "intervalMeanQuadrature": "trapezoid",
+    "stateOutput": "end-of-year",
+    "notes": "The paper does not identify a numerical solver or define within-year averaging. This application uses classical fourth-order Runge-Kutta with a fixed substep per year and reports both the end-of-year state and the trapezoidal interval mean of live coral cover."
+  },
+  "studyArea": {
+    "id": "puerto-princesa-city",
+    "label": "Puerto Princesa City, Palawan, Philippines",
+    "scope": "citywide-annual-average",
+    "description": "The paper models the annual average live coral cover of Puerto Princesa City. This is a citywide annual model, not a validated per-reef-site or per-coordinate forecast.",
+    "referenceOnlyLabels": [
+      "paper-reported",
+      "paper-reported projection"
+    ]
+  },
+  "paperConflicts": [
+    {
+      "id": "pagasa-air-temperature",
+      "severity": "warning",
+      "title": "PAGASA appendix pages are not an SST series",
+      "detail": "The appendix PAGASA pages show meteorological-station observations, including air temperature, not a verified sea-surface-temperature time series. T(t) requires SST in degrees Celsius."
+    },
+    {
+      "id": "validation-window-conflict",
+      "severity": "warning",
+      "title": "Validation window conflicts with the results tables",
+      "detail": "The accuracy section describes 2015-2017 validation, but the results tables compare 2006 and 2016. The 2006 observed cover and some 2016 predictions also conflict between tables."
+    },
+    {
+      "id": "mae-not-reconciled",
+      "severity": "warning",
+      "title": "Reported MAE of 0.30 does not reconcile with the displayed values",
+      "detail": "The paper reports a mean absolute error of 0.30 that does not follow from its own displayed table values. It is shown as a paper-reported claim only and is never presented as an independently verified accuracy result of this application."
+    },
+    {
+      "id": "condition-category-conflict",
+      "severity": "info",
+      "title": "Condition categories disagree at 75% cover",
+      "detail": "The paper's condition wording is not gap-free at 75%. This application uses a configurable, gap-free provisional convention and always shows which convention produced a label."
+    },
+    {
+      "id": "unidentified-solver",
+      "severity": "info",
+      "title": "Solver and within-year averaging are not defined in the paper",
+      "detail": "The paper does not identify its numerical solver and does not define within-year averaging, so the solver settings are recorded with every prediction."
+    },
+    {
+      "id": "provisional-parameters",
+      "severity": "warning",
+      "title": "K and beta are provisional",
+      "detail": "K (70) and beta (5.6743e-8) are visible only in the handwritten Appendix C calculation and are provisional pending verification of value and units."
+    },
+    {
+      "id": "baseline-year-inference",
+      "severity": "info",
+      "title": "The 2006 baseline year is an inference",
+      "detail": "The paper's use of 2006 as t = 0 is an inference. The configured baseline year is stored and displayed with every prediction."
+    }
+  ],
+  "demoProfile": {
+    "id": "demo-synthetic",
+    "label": "DEMO (synthetic, development only)",
+    "description": "Uses explicitly synthetic alpha and g values so the end-to-end request path can be exercised. Results are labelled DEMO and are never a forecast.",
+    "values": {
+      "alpha": 0.05,
+      "g": 0.02
+    },
+    "status": "synthetic-demo-only"
+  },
+  "targetMeasure": "%LCC (HC+SC) in percentage points on a 0-100 scale",
+  "requestId": "151e24aaaf954cc6ad3fb0499cb27a69",
+  "equationSource": "CCOverT research paper, 'A Coral Cover Over Time Model for Predicting Coral Reef Changes in Puerto Princesa City, Palawan' (CCOverT_.docx), including the handwritten Appendix C calculation."
+}

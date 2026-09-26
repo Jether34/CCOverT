@@ -1,0 +1,33 @@
+{
+  "name": "ccover-t",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "description": "CCOverT coral-cover research application with an evidence-gated model boundary",
+  "workspaces": [
+    "apps/web",
+    "apps/api",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @ccovert/shared && npm run build --workspace @ccovert/api && npm run build --workspace @ccovert/web",
+    "pretypecheck": "npm run build --workspace @ccovert/shared",
+    "prelint": "npm run build --workspace @ccovert/shared",
+    "pretest": "npm run build --workspace @ccovert/shared",
+    "dev": "npm run build --workspace @ccovert/shared && concurrently \"npm run dev --workspace @ccovert/api\" \"npm run dev --workspace @ccovert/web\" \"npm run dev:model\"",
+    "dev:web": "npm run build --workspace @ccovert/shared && npm run dev --workspace @ccovert/web",
+    "dev:api": "npm run build --workspace @ccovert/shared && npm run dev --workspace @ccovert/api",
+    "dev:model": "python -m uvicorn ccover_model.api:app --app-dir services/model-api --env-file .env --reload --port 8000",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && npm run test:model",
+    "test:model": "python -m unittest discover -s services/model-api/tests -t services/model-api -p \"test_*.py\"",
+    "format:check": "npm run format:check --workspaces --if-present",
+    "smoke:model": "python services/model-api/smoke_contract_check.py"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

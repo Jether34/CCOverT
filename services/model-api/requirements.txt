@@ -1,0 +1,8 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.5
+httpx==0.28.1
+pytest==8.3.4
+# Required by `uvicorn --env-file .env`, which is how the service reads
+# MODEL_SERVICE_TOKEN during local development.
+python-dotenv==1.2.3

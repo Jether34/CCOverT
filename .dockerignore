@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+__pycache__
+**/__pycache__
+*.py[cod]
+.venv
+uploads/*
+!uploads/.gitkeep
