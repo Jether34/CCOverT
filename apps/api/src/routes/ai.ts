@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { CreateAiReportResponse } from '@ccovert/shared';
-import { requireAuth } from '../middleware/auth';
-import { asyncHandler } from '../utils/errors';
+import { requireVerifiedEmail } from '../middleware/auth';
+import { asyncHandler, badRequest } from '../utils/errors';
 import { sameOriginMiddleware } from '../utils/session';
 import { createAiReportRequestSchema, idSchema } from '../utils/validation';
 import { aiReportService } from '../services/ai';
@@ -9,7 +9,7 @@ import { aiReportService } from '../services/ai';
 export function createAiRouter(): Router {
   const router = Router();
 
-  router.get('/status', requireAuth, (_request, response) => {
+  router.get('/status', requireVerifiedEmail, (_request, response) => {
     const status = aiReportService.aiStatus();
     response.json({
       ...status,
@@ -20,16 +20,17 @@ export function createAiRouter(): Router {
     });
   });
 
-  router.get('/reports', requireAuth, asyncHandler(async (request, response) => {
+  router.get('/reports', requireVerifiedEmail, asyncHandler(async (request, response) => {
     response.json({ reports: await aiReportService.list(request.user!.id) });
   }));
 
-  router.get('/reports/:id', requireAuth, asyncHandler(async (request, response) => {
+  router.get('/reports/:id', requireVerifiedEmail, asyncHandler(async (request, response) => {
     response.json({ report: await aiReportService.get(idSchema.parse(request.params.id), request.user!.id) });
   }));
 
-  router.post('/reports', requireAuth, sameOriginMiddleware, asyncHandler(async (request, response) => {
+  router.post('/reports', requireVerifiedEmail, sameOriginMiddleware, asyncHandler(async (request, response) => {
     const input = createAiReportRequestSchema.parse(request.body);
+    if (input.uploadIds.length > 0) throw badRequest('AI reports can only use this account’s prediction history. File evidence is not supported.');
     const report = await aiReportService.create({
       userId: request.user!.id,
       predictionIds: input.predictionIds,

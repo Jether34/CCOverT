@@ -3,12 +3,16 @@ import path from 'node:path';
 import type { UploadRecord } from '@ccovert/shared';
 import { config } from '../config';
 import { logger } from '../logger';
-import { db, readStoredFile, writeStoredFile, type UploadRecordStored } from '../repositories/database';
-import { badRequest, notFound, payloadTooLarge, unsupportedMedia } from '../utils/errors';
+import { db, writeStoredFile, type UploadRecordStored } from '../repositories/database';
+import { badRequest, notFound, payloadTooLarge, unsupportedMedia, unprocessable } from '../utils/errors';
 import { extractPdfText } from './pdfText';
 
 const allowedExtensions = new Set(['.pdf', '.txt', '.csv', '.json']);
 const allowedMimeTypes = new Set(['application/pdf', 'text/plain', 'text/csv', 'application/json']);
+const mimeByExtension: Record<string, string[]> = {
+  '.pdf': ['application/pdf'], '.txt': ['text/plain'],
+  '.csv': ['text/csv', 'text/plain'], '.json': ['application/json', 'text/plain']
+};
 const MAX_PREVIEW_CHARACTERS = 12000;
 
 const safeFileName = (name: string): string => path.basename(name).replace(/[^a-zA-Z0-9._ -]/g, '_');
@@ -26,7 +30,7 @@ export async function storeUpload(file: Express.Multer.File, userId: string): Pr
   }
   const filename = safeFileName(file.originalname);
   const extension = path.extname(filename).toLowerCase();
-  if (!allowedExtensions.has(extension) || !allowedMimeTypes.has(file.mimetype)) {
+  if (!allowedExtensions.has(extension) || !allowedMimeTypes.has(file.mimetype) || !mimeByExtension[extension]?.includes(file.mimetype)) {
     throw unsupportedMedia('Only PDF, TXT, CSV, and JSON files are accepted');
   }
   if (/\.(?:exe|js|jsx|ts|sh|bat|cmd|ps1|vbs)$/i.test(filename)) {
@@ -110,12 +114,13 @@ export async function getUploadOrThrow(uploadId: string, userId: string): Promis
 
 export async function readUploadText(uploadId: string, userId: string): Promise<{ filename: string; text: string; pageCount: number | null }> {
   const record = await getUploadOrThrow(uploadId, userId);
+  if (record.extractionStatus !== 'text-available' || !record.textPreview?.trim()) {
+    throw unprocessable('This document has no verified extracted text. Upload a text-readable PDF or provide OCR text before requesting an AI report', 'DOCUMENT_TEXT_UNAVAILABLE');
+  }
   if (record.textPreview) {
     return { filename: record.filename, text: record.textPreview, pageCount: record.pageCount };
   }
-  const bytes = readStoredFile(record.storageKey);
-  if (!bytes) throw notFound('The stored file is no longer available');
-  return { filename: record.filename, text: bytes.toString('utf8').slice(0, MAX_PREVIEW_CHARACTERS), pageCount: record.pageCount };
+  throw unprocessable('The extracted document text is unavailable', 'DOCUMENT_TEXT_UNAVAILABLE');
 }
 
 export async function deleteUpload(uploadId: string, userId: string): Promise<void> {

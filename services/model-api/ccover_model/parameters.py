@@ -14,6 +14,12 @@ from typing import Any, Optional
 
 EQUATION_VERSION = "ccoverT-1.0.0"
 MODEL_VERSION = "ccoverT-paper-implementation"
+TOURISM_CONFIG_VERSION = "piecewise-tourism-1.0.0"
+PAPER_REPRODUCTION_CONFIG_VERSION = "paper-reproduction-1.0.0"
+PAPER_REPRODUCTION_LABEL = (
+    "Paper-reproduction prediction using stated, estimated, inferred, and provisional parameters. "
+    "Independent scientific validation is pending."
+)
 EQUATION_SOURCE = (
     "CCOverT research paper, 'A Coral Cover Over Time Model for Predicting Coral "
     "Reef Changes in Puerto Princesa City, Palawan' (CCOverT_.docx), including the "
@@ -25,6 +31,16 @@ EQUATIONS: dict[str, str] = {
     "temperature": "T(t) = T0 + gamma*t",
     "tourism": "V(t) = V0*exp(g*t)",
 }
+
+# Confirmed paper-reproduction configuration. These values are deliberately
+# separate from PAPER_PARAMETER_SPECS: the strict paper profile remains
+# unavailable until its missing and unreviewed inputs are resolved.
+PAPER_REPRODUCTION_TOURISM_PERIODS: tuple[dict[str, Any], ...] = (
+    {"startYear": 2006, "endYear": 2016, "growthRate": 0.213314, "unit": "per year", "provenance": "Confirmed paper-reproduction tourism configuration for Puerto Princesa City annual arrivals.", "reviewStatus": "unreviewed", "effectiveDate": "2026-09-27"},
+    {"startYear": 2017, "endYear": 2022, "growthRate": 0.0, "unit": "per year", "provenance": "Confirmed paper-reproduction tourism configuration; no growth period.", "reviewStatus": "unreviewed", "effectiveDate": "2026-09-27"},
+    {"startYear": 2023, "endYear": 2026, "growthRate": 0.128708, "unit": "per year", "provenance": "Confirmed paper-reproduction tourism configuration for Puerto Princesa City annual arrivals.", "reviewStatus": "unreviewed", "effectiveDate": "2026-09-27"},
+    {"startYear": 2027, "endYear": 9999, "growthRate": 0.128708, "unit": "per year", "provenance": "Confirmed continuation of the 2023-2026 tourism growth rate after 2026.", "reviewStatus": "unreviewed", "effectiveDate": "2026-09-27"},
+)
 
 #: Status values used for parameter provenance across the whole application.
 STATUS_REPORTED = "reported"

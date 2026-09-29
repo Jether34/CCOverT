@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { REQUIRED_PARAMETER_KEYS, SOLVER_DEFAULTS, STUDY_AREA } from '@ccovert/shared';
+import { PAPER_SITES, REQUIRED_PARAMETER_KEYS, SOLVER_DEFAULTS, STUDY_AREA } from '@ccovert/shared';
 import { config } from '../config';
 
 /* -------------------------------------------------------------------------- */
@@ -17,8 +17,9 @@ export const passwordSchema = z
   .regex(/[0-9]/, 'Password must include a number.')
   .refine((value) => Buffer.byteLength(value, 'utf8') <= 72, 'Password must be no longer than 72 UTF-8 bytes.');
 
-export const signupSchema = z.object({ email: emailSchema, password: passwordSchema });
-export const loginSchema = signupSchema;
+export const signupSchema = z.object({ email: emailSchema, password: passwordSchema, paperSite: z.enum(PAPER_SITES), captchaToken: z.string().trim().max(4000).optional() });
+export const loginSchema = z.object({ email: emailSchema, password: passwordSchema, captchaToken: z.string().trim().max(4000).optional() });
+export const loginOtpSchema = z.object({ email: emailSchema, code: z.string().regex(/^\d{6}$/, 'Enter the six-digit code sent to your email.'), captchaToken: z.string().trim().max(4000).optional() });
 export const verifySchema = z.object({ token: z.string().min(20).max(300) });
 export const forgotPasswordSchema = z.object({ email: emailSchema });
 export const resetPasswordSchema = z.object({
@@ -27,7 +28,8 @@ export const resetPasswordSchema = z.object({
 });
 export const settingsSchema = z.object({
   theme: z.enum(['light', 'dark']),
-  language: z.enum(['en', 'fil'])
+  language: z.enum(['en', 'fil']),
+  paperSite: z.enum(PAPER_SITES).nullable().optional()
 });
 export const idSchema = z.string().min(1).max(100);
 
@@ -77,6 +79,7 @@ const coralBaselineSchema = z.object({
   measure: z.string().trim().min(1).max(80).default('%LCC (HC+SC)'),
   surveySource: z.string().trim().min(2, 'Name the survey or report the baseline came from.').max(400)
     .refine((value) => /(?:18|19|20|21)\d{2}/.test(value), 'Include the source year for the coral-cover baseline.'),
+  surveyMethod: z.string().trim().min(3).max(300).nullable().optional().default(null),
   surveyScope: studyAreaScopeSchema,
   sameScopeConfirmed: z.literal(true, {
     errorMap: () => ({ message: 'Confirm the baseline scope matches the citywide model scope.' })
@@ -108,9 +111,10 @@ const scenarioAssumptionSchema = z.object({
 export const createPredictionSchema = z.object({
   studyAreaId: z.string().trim().min(1).max(120).default(STUDY_AREA.id),
   scope: studyAreaScopeSchema.default('citywide-annual-average'),
-  profile: z.enum(['paper', 'demo', 'scenario']).default('paper'),
+  profile: z.enum(['paper', 'demo', 'scenario', 'paper-reproduction']).default('paper'),
   baselineYear: z.coerce.number().int().min(1900).max(2100),
   horizonYears: z.coerce.number().int().min(1).max(100),
+  forecastEndYear: z.coerce.number().int().min(1901).max(2200).optional(),
   coralBaseline: coralBaselineSchema,
   sstDatasetId: idSchema.nullable().optional().default(null),
   tourismDatasetId: idSchema.nullable().optional().default(null),
@@ -120,11 +124,37 @@ export const createPredictionSchema = z.object({
   }).default({ substepsPerYear: SOLVER_DEFAULTS.substepsPerYear }),
   assumedValues: z.array(scenarioAssumptionSchema).max(2).optional().default([])
 }).superRefine((value, ctx) => {
-  if (value.coralBaseline.year !== value.baselineYear) {
+  const forecastEndYear = value.forecastEndYear ?? value.baselineYear + value.horizonYears;
+  const derivedHorizonYears = forecastEndYear - value.baselineYear;
+  if (forecastEndYear <= value.baselineYear) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['forecastEndYear'],
+      message: `The forecast ending year (${forecastEndYear}) must be after the model baseline year (${value.baselineYear}).`
+    });
+  }
+  if (forecastEndYear > config.model.maxForecastYear) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['forecastEndYear'],
+      message: `The forecast ending year cannot exceed the configured maximum year ${config.model.maxForecastYear}.`
+    });
+  }
+  if (derivedHorizonYears < 1 || derivedHorizonYears > config.model.maxForecastHorizonYears) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['forecastEndYear'],
+      message: `The forecast duration must be between 1 and ${config.model.maxForecastHorizonYears} years; received ${derivedHorizonYears}.`
+    });
+  }
+  const expectedProfileBaseline = value.baselineYear;
+  if (value.coralBaseline.year !== expectedProfileBaseline) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['coralBaseline', 'year'],
-      message: `The baseline year must match the model baseline year (${value.baselineYear}).`
+      message: value.profile === 'paper-reproduction'
+        ? `The paper-reproduction coralBaseline.year must match baselineYear (${value.baselineYear}); received ${value.coralBaseline.year}.`
+        : `The baseline year must match the request model baseline year (${value.baselineYear}); received ${value.coralBaseline.year}.`
     });
   }
   if (value.profile === 'demo' && !config.model.allowDemoProfile) {
@@ -183,7 +213,7 @@ export const predictionListQuerySchema = z.object({
 });
 
 export const downloadQuerySchema = z.object({
-  format: z.enum(['markdown', 'csv', 'json']).optional().default('markdown')
+  format: z.enum(['pdf', 'csv', 'markdown']).optional().default('pdf')
 });
 
 /* -------------------------------------------------------------------------- */
@@ -211,12 +241,44 @@ export const createModelConfigSchema = z.object({
   changes: z.record(parameterKeySchema, z.coerce.number().finite()),
   notes: z.string().trim().min(4, 'Explain where these values come from.').max(2000),
   effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use an ISO date.').nullable().optional().default(null),
+  baselineYear: z.coerce.number().int().min(1900).max(2100).optional(),
+  horizonYears: z.coerce.number().int().min(1).max(100).optional(),
+  initialCoverPercent: z.coerce.number().finite().min(0).max(100).optional(),
+  initialCoverYear: z.coerce.number().int().min(1900).max(2100).optional(),
+  initialCoverSource: z.string().trim().min(4).max(400).optional(),
   reviewStatus: z.enum(['unreviewed', 'reviewed']).default('unreviewed'),
   sourceDatasetIds: z.record(z.string().trim().min(1).max(200)).optional(),
   sstDatasetId: idSchema.nullable().optional(),
   tourismDatasetId: idSchema.nullable().optional()
 }).refine((value) => Object.keys(value.changes).length > 0 || value.sstDatasetId !== undefined || value.tourismDatasetId !== undefined, {
   message: 'Provide at least one parameter value or choose a dataset.'
+});
+
+/**
+ * The application has one active model configuration. Researchers may update
+ * its numeric parameters, while baseline, datasets, solver, and profile stay
+ * owned by the active configuration and are inherited automatically.
+ */
+export const updateActiveModelParametersSchema = z.object({
+  changes: z.record(parameterKeySchema, z.coerce.number().finite()).refine(
+    (changes) => Object.keys(changes).length > 0,
+    'Provide at least one model parameter.'
+  ),
+  notes: z.string().trim().min(4, 'Explain where these values come from.').max(2000)
+});
+
+/* -------------------------------------------------------------------------- */
+/* independent review                                                          */
+/* -------------------------------------------------------------------------- */
+
+export const datasetReviewSchema = z.object({
+  status: z.enum(['validated', 'needs-review', 'rejected']),
+  notes: z.string().trim().min(4, 'Record why this series is or is not trustworthy.').max(2000)
+});
+
+export const modelConfigReviewSchema = z.object({
+  version: z.string().trim().min(1).max(60),
+  notes: z.string().trim().min(4, 'Record what you checked before signing off.').max(2000)
 });
 
 /* -------------------------------------------------------------------------- */

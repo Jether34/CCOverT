@@ -48,7 +48,12 @@ const buildConfig = (input: {
   notes: string;
   effectiveDate: string | null;
   reviewedBy: string | null;
+  reviewedVersion?: string | null;
   baselineYear: number;
+  horizonYears: number;
+  initialCoverPercent: number;
+  initialCoverYear: number;
+  initialCoverSource: string;
   sstDatasetId?: string | null;
   tourismDatasetId?: string | null;
 }): ModelConfigRecord => {
@@ -62,6 +67,12 @@ const buildConfig = (input: {
     profile: input.profile,
     studyAreaId: STUDY_AREA.id,
     baselineYear: input.baselineYear,
+    predictionStartYear: input.baselineYear,
+    horizonYears: input.horizonYears,
+    forecastEndYear: input.baselineYear + input.horizonYears,
+    initialCoverPercent: input.initialCoverPercent,
+    initialCoverYear: input.initialCoverYear,
+    initialCoverSource: input.initialCoverSource,
     sstDatasetId: input.sstDatasetId ?? null,
     tourismDatasetId: input.tourismDatasetId ?? null,
     archivedAt: null,
@@ -73,6 +84,7 @@ const buildConfig = (input: {
     createdBy: input.createdBy,
     createdAt: now,
     effectiveDate: input.effectiveDate,
+    reviewedVersion: input.reviewedVersion ?? null,
     notes: input.notes
   };
 };
@@ -87,6 +99,19 @@ export const provisionalParameters = (parameters: ModelParameter[]): string[] =>
 
 export const parameterByKey = (parameters: ModelParameter[], key: string): ModelParameter | undefined =>
   parameters.find((parameter) => parameter.key === key);
+
+/** API-side safety gate, consistent with the solver's published parameter bounds. */
+export const validateParameterValue = (key: string, value: number): void => {
+  const bounds: Record<string, [number, number]> = {
+    r: [0, 5], alpha: [0, Number.MAX_VALUE], beta: [0, Number.MAX_VALUE],
+    gamma: [-0.5, 0.5], T0: [-5, 45], Tcrit: [-5, 45],
+    V0: [0, Number.MAX_VALUE], g: [-0.5, 0.5], K: [Number.EPSILON, 100]
+  };
+  const range = bounds[key];
+  if (!range || !Number.isFinite(value) || value < range[0] || value > range[1]) {
+    throw badRequest(`Parameter ${key} is outside the supported finite range`, 'INVALID_MODEL_PARAMETER');
+  }
+};
 
 export class ModelConfigService {
   /** Creates the immutable paper-profile baseline on first boot. */
@@ -109,6 +134,10 @@ export class ModelConfigService {
       effectiveDate: '2006-01-01',
       reviewedBy: null,
       baselineYear: 2006
+      ,horizonYears: 10
+      ,initialCoverPercent: 57
+      ,initialCoverYear: 2006
+      ,initialCoverSource: 'CCOverT paper reported 2006 baseline; researcher confirmation required'
     });
     await db.createModelConfig(record);
     logger.info('Seeded the paper model configuration', { version: record.version });
@@ -139,6 +168,10 @@ export class ModelConfigService {
       effectiveDate: '2006-01-01',
       reviewedBy: null,
       baselineYear: 2006
+      ,horizonYears: 10
+      ,initialCoverPercent: 57
+      ,initialCoverYear: 2006
+      ,initialCoverSource: 'Researcher-configured baseline; source confirmation required'
     });
   }
 
@@ -156,6 +189,37 @@ export class ModelConfigService {
     return config.model.allowDemoProfile;
   }
 
+  public async paperReadiness(record?: ModelConfigRecord | null, inactiveAlphaForHorizon = false): Promise<{ ready: boolean; reasons: string[] }> {
+    const active = record === undefined ? await this.getActive() : record;
+    const reasons: string[] = [];
+    if (!active || active.profile !== 'paper') return { ready: false, reasons: ['No active paper model configuration'] };
+    if (active.reviewStatus !== 'reviewed' || !active.reviewedBy || active.reviewedBy === active.createdBy) {
+      reasons.push('Model version has no independent review');
+    }
+    for (const parameter of active.parameters) {
+      if (parameter.key === 'alpha' && inactiveAlphaForHorizon && parameter.value === null) continue;
+      if (parameter.value === null || !Number.isFinite(parameter.value)) {
+        reasons.push(`${parameter.key} is missing`);
+        continue;
+      }
+      try { validateParameterValue(parameter.key, parameter.value); }
+      catch { reasons.push(`${parameter.key} is outside the supported range`); }
+      if (parameter.reviewStatus !== 'reviewed' || ['provisional', 'assumed', 'synthetic-demo-only'].includes(parameter.status)) {
+        reasons.push(`${parameter.key} is not independently reviewed`);
+      }
+      if (!parameter.provenance.trim() || !parameter.unit.trim()) reasons.push(`${parameter.key} lacks source or units`);
+    }
+    for (const [kind, id] of [['sst', active.sstDatasetId], ['tourism', active.tourismDatasetId]] as const) {
+      const dataset = id ? await db.findDatasetById(id) : null;
+      if (!dataset || dataset.kind !== kind || dataset.status !== 'validated' || dataset.scope !== 'citywide-annual-average' ||
+          !dataset.checksumSha256 || !dataset.sourceCitation.trim() || !dataset.provider.trim() ||
+          !dataset.records.some((item) => item.year === active.baselineYear)) {
+        reasons.push(`${kind} lacks a reviewed, traceable citywide series covering the baseline year`);
+      }
+    }
+    return { ready: reasons.length === 0, reasons };
+  }
+
   public async assertDemoAllowed(): Promise<void> {
     if (!config.model.allowDemoProfile) {
       throw forbidden('The synthetic demo profile is disabled on this environment');
@@ -169,12 +233,21 @@ export class ModelConfigService {
     notes: string;
     createdById: string;
     createdByLabel: string;
-    effectiveDate: string | null;
+  effectiveDate: string | null;
+  reviewedVersion?: string | null;
     reviewStatus: ReviewStatus;
     sourceDatasetIds?: Record<string, string>;
     sstDatasetId?: string | null;
     tourismDatasetId?: string | null;
+    baselineYear?: number;
+    horizonYears?: number;
+    initialCoverPercent?: number;
+    initialCoverYear?: number;
+    initialCoverSource?: string;
   }): Promise<ModelConfigRecord> {
+    if (input.reviewStatus === 'reviewed') {
+      throw forbidden('Publishing and independently reviewing the same configuration is not supported; publish it as unreviewed');
+    }
     const base = await this.getByVersion(input.baseVersion);
     if (base.profile === 'demo') throw forbidden('The demo profile cannot be used as a base version');
     if (base.archivedAt) throw forbidden('An archived configuration cannot be edited');
@@ -191,6 +264,9 @@ export class ModelConfigService {
       const dataset = await db.findDatasetById(datasetId);
       if (!dataset) throw badRequest(`Source dataset ${datasetId} for ${key} does not exist`);
       if (dataset.ownerId !== input.createdById) throw forbidden(`Source dataset ${datasetId} for ${key} belongs to another account`);
+      if (dataset.status === 'rejected' || dataset.scope !== 'citywide-annual-average') throw badRequest('A source dataset must be citywide and not rejected');
+      if (['T0', 'gamma'].includes(key) && dataset.kind !== 'sst') throw badRequest(`${key} requires an SST source dataset`);
+      if (['V0', 'g'].includes(key) && dataset.kind !== 'tourism') throw badRequest(`${key} requires a tourism source dataset`);
     }
     const selectedTourismId = input.tourismDatasetId === undefined ? base.tourismDatasetId : input.tourismDatasetId;
     const selectedTourism = selectedTourismId ? await db.findDatasetById(selectedTourismId) : null;
@@ -199,7 +275,7 @@ export class ModelConfigService {
     const parameters = base.parameters.map((parameter) => {
       const next = input.changes[parameter.key] ?? (parameter.key === 'g' && parameter.value === null ? derivedGrowth : undefined);
       if (next === undefined) return { ...parameter };
-      if (!Number.isFinite(next)) throw forbidden(`Parameter ${parameter.key} must be a finite number`);
+      validateParameterValue(parameter.key, next);
       return {
         ...parameter,
         value: next,
@@ -214,6 +290,9 @@ export class ModelConfigService {
         effectiveDate: input.effectiveDate
       };
     });
+    for (const parameter of parameters) {
+      if (parameter.value !== null) validateParameterValue(parameter.key, parameter.value);
+    }
     const record = buildConfig({
       version: `${base.version.split('+')[0]}+cfg-${crypto.randomBytes(4).toString('hex')}`,
       profile: base.profile,
@@ -223,8 +302,12 @@ export class ModelConfigService {
       reviewStatus: input.reviewStatus,
       notes: input.notes,
       effectiveDate: input.effectiveDate,
-      reviewedBy: input.reviewStatus === 'reviewed' ? input.createdByLabel : null,
-      baselineYear: base.baselineYear,
+      reviewedBy: null,
+      baselineYear: input.baselineYear ?? base.baselineYear,
+      horizonYears: input.horizonYears ?? base.horizonYears,
+      initialCoverPercent: input.initialCoverPercent ?? base.initialCoverPercent,
+      initialCoverYear: input.initialCoverYear ?? base.initialCoverYear,
+      initialCoverSource: input.initialCoverSource ?? base.initialCoverSource,
       sstDatasetId: input.sstDatasetId === undefined ? base.sstDatasetId : input.sstDatasetId,
       tourismDatasetId: input.tourismDatasetId === undefined ? base.tourismDatasetId : input.tourismDatasetId
     });
@@ -232,6 +315,78 @@ export class ModelConfigService {
     await db.setActiveModelConfig(record._id);
     logger.info('Created a new immutable model configuration version', { version: record.version, createdBy: input.createdByLabel });
     recordActivity({ kind: 'change', action: `Published model configuration ${record.version}`, actorId: input.createdById });
+    return record;
+  }
+
+  /**
+   * Records an independent review as a NEW version, because published versions
+   * are immutable. This is the only path that can set `reviewedBy`, and it
+   * refuses the author of the version being reviewed.
+   *
+   * Reviewing attests to the version as published; it does not promote
+   * `provisional`, `assumed`, or `synthetic-demo-only` parameters. Those keep
+   * their status, so `paperReadiness` still reports them until an author
+   * republishes them as configured and a reviewer signs off again.
+   */
+  public async reviewVersion(input: {
+    version: string;
+    notes: string;
+    reviewedById: string;
+    reviewedByLabel: string;
+  }): Promise<ModelConfigRecord> {
+    const base = await this.getByVersion(input.version);
+    if (base.profile !== 'paper') throw forbidden('Only a paper-profile version can be independently reviewed');
+    if (base.archivedAt) throw forbidden('An archived configuration cannot be reviewed');
+    // Self-approval guard: the author of the version under review is refused,
+    // which is what makes the recorded reviewer genuinely independent.
+    if (base.createdBy === input.reviewedByLabel) {
+      throw forbidden('You published this configuration version, so you cannot record its independent review');
+    }
+    if (base.reviewStatus === 'reviewed') {
+      throw forbidden('This configuration version already carries an independent review');
+    }
+    if (!input.notes.trim()) {
+      throw badRequest('A written review note is required for every independent review', 'VALIDATION_ERROR');
+    }
+    const already = (await db.listModelConfigs(200)).find(
+      (candidate) => candidate.reviewedVersion === base.version
+    );
+    if (already) {
+      throw forbidden(`This configuration version was already reviewed and published as ${already.version}`);
+    }
+    const record = buildConfig({
+      version: `${base.version.split('+')[0].split('-review')[0]}-review-${crypto.randomBytes(4).toString('hex')}`,
+      profile: base.profile,
+      // Parameter values and statuses carry over untouched; only the review
+      // state of the whole version changes.
+      parameters: base.parameters.map((parameter) => ({ ...parameter })),
+      active: true,
+      createdBy: base.createdBy,
+      reviewStatus: 'reviewed',
+      notes: `Independent review of ${base.version} by ${input.reviewedByLabel}: ${input.notes.trim()}`,
+      effectiveDate: base.effectiveDate,
+      reviewedBy: input.reviewedByLabel,
+      reviewedVersion: base.version,
+      baselineYear: base.baselineYear,
+      horizonYears: base.horizonYears,
+      initialCoverPercent: base.initialCoverPercent,
+      initialCoverYear: base.initialCoverYear,
+      initialCoverSource: base.initialCoverSource,
+      sstDatasetId: base.sstDatasetId,
+      tourismDatasetId: base.tourismDatasetId
+    });
+    await db.createModelConfig(record);
+    await db.setActiveModelConfig(record._id);
+    logger.info('Recorded an independent review of a model configuration', {
+      version: record.version,
+      reviewedVersion: base.version,
+      reviewedBy: input.reviewedByLabel
+    });
+    recordActivity({
+      kind: 'change',
+      action: `Reviewed model configuration ${base.version} as ${record.version}`,
+      actorId: input.reviewedById
+    });
     return record;
   }
 

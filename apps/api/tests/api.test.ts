@@ -22,7 +22,7 @@ beforeAll(async () => {
 });
 
 async function register(agent: Agent, email: string): Promise<{ userId: string }> {
-  const signup = await agent.post('/api/v1/auth/signup').send({ email, password: 'StrongPassword123' });
+  const signup = await agent.post('/api/v1/auth/signup').send({ email, password: 'StrongPassword123', paperSite: 'Babuyan' });
   expect(signup.status).toBe(201);
   const url = new URL(signup.body.developmentVerificationUrl);
   await agent.post('/api/v1/auth/verify').send({ token: url.searchParams.get('token') ?? '' });
@@ -44,6 +44,7 @@ const validPrediction = (overrides: Record<string, unknown> = {}): Record<string
     softCoralPercent: null,
     measure: '%LCC (HC+SC)',
     surveySource: 'Citywide reef survey 2006',
+    surveyMethod: 'Citywide transect survey',
     surveyScope: 'citywide-annual-average',
     sameScopeConfirmed: true
   },
@@ -59,6 +60,13 @@ describe('service health and error contract', () => {
     const response = await request(app).get('/health');
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ status: 'ok', service: 'ccover-t-api', database: 'memory', version: 1 });
+  });
+
+  it('keeps liveness separate from readiness and protects operational metrics', async () => {
+    const readiness = await request(app).get('/ready');
+    expect(readiness.status).toBe(503);
+    expect(readiness.body.modelService).toBe('unavailable');
+    expect((await request(app).get('/metrics')).status).toBe(401);
   });
 
   it('returns a request id on every response and echoes a supplied one', async () => {
@@ -77,11 +85,32 @@ describe('service health and error contract', () => {
 });
 
 describe('accounts', () => {
+  it('allows staff roles to operate without email verification', async () => {
+    const agent = request.agent(app);
+    const signup = await agent.post('/api/v1/auth/signup').send({ email: 'r@cctover.com', password: 'StrongPassword123', paperSite: 'Babuyan' });
+    expect(signup.status).toBe(201);
+    expect(signup.body.user.role).toBe('client');
+    const account = await database.findUserByEmail('r@cctover.com');
+    expect(account).not.toBeNull();
+    await database.updateUser(account!.id, { role: 'researcher' });
+    const researcherLogin = await agent.post('/api/v1/auth/login').send({ email: 'r@cctover.com', password: 'StrongPassword123' });
+    expect(researcherLogin.status).toBe(200);
+    expect(researcherLogin.body.otpRequired).toBe(false);
+    const researcher = await agent.post('/api/v1/model/versions').send({});
+    expect(researcher.status).toBe(400);
+    expect(researcher.body.error.code).toBe('VALIDATION_ERROR');
+    await database.updateUser(account!.id, { role: 'admin' });
+    const admin = await agent.get('/api/v1/developer/status');
+    expect(admin.status).toBe(200);
+  });
   it('validates signup and protects the session', async () => {
     const agent = request.agent(app);
     const invalid = await agent.post('/api/v1/auth/signup').send({ email: 'not-an-email', password: 'short' });
     expect(invalid.status).toBe(400);
     expect(invalid.body.error.code).toBe('VALIDATION_ERROR');
+    const missingLocation = await agent.post('/api/v1/auth/signup').send({ email: 'missing-location@example.test', password: 'StrongPassword123' });
+    expect(missingLocation.status).toBe(400);
+    expect(missingLocation.body.error.code).toBe('VALIDATION_ERROR');
 
     const session = await register(agent, 'one@example.test');
     const me = await agent.get('/api/v1/auth/me');
@@ -144,7 +173,7 @@ describe('model readiness gate', () => {
     expect(excellent.upperInclusive).toBe(true);
   });
 
-  it('refuses to create a prediction and saves nothing', async () => {
+  it('refuses to create a prediction and saves the refused attempt', async () => {
     const agent = request.agent(app);
     await register(agent, 'blocked@example.test');
     const response = await agent.post('/api/v1/predictions').send(validPrediction());
@@ -153,8 +182,10 @@ describe('model readiness gate', () => {
     expect(response.body.error.message).toContain('alpha');
     expect(response.body.error.message).toContain('g');
     const list = await agent.get('/api/v1/predictions');
-    expect(list.body.predictions).toHaveLength(0);
-    expect(list.body.total).toBe(0);
+    expect(list.body.predictions).toHaveLength(1);
+    expect(list.body.predictions[0].status).toBe('unavailable');
+    expect(list.body.predictions[0].failureReason).toContain('alpha');
+    expect(list.body.total).toBe(1);
   });
 
   it('keeps the demo profile disabled by default', async () => {
@@ -269,7 +300,7 @@ describe('scenario runs with assumed values', () => {
     expect(record.warnings[0]).toContain('not a validated prediction');
 
     const dashboard = await agent.get('/api/v1/dashboard');
-    expect(dashboard.body.predictionCount).toBe(0);
+    expect(dashboard.body.predictionCount).toBe(1);
   });
 });
 
@@ -317,6 +348,8 @@ describe('uploads', () => {
     expect(script.status).toBe(415);
     const binaryText = await agent.post('/api/v1/uploads').attach('file', Buffer.from([0, 1, 2, 3]), { filename: 'data.txt', contentType: 'text/plain' });
     expect(binaryText.status).toBe(400);
+    const disguised = await agent.post('/api/v1/uploads').attach('file', Buffer.from('%PDF-1.7'), { filename: 'data.txt', contentType: 'application/pdf' });
+    expect(disguised.status).toBe(415);
   });
 
   it('stores an allowed document privately and scopes it to the owner', async () => {
@@ -360,6 +393,9 @@ describe('uploads', () => {
     expect(unsupported.status).toBe(201);
     expect(unsupported.body.upload.extractionStatus).toBe('extraction-unsupported');
     expect(unsupported.body.upload.textPreview).toBeNull();
+    const report = await agent.post('/api/v1/ai/reports').send({ uploadIds: [unsupported.body.upload.id] });
+    expect(report.status).toBe(400);
+    expect(JSON.stringify(report.body.error)).toContain('prediction history');
   });
 });
 

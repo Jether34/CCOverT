@@ -1,0 +1,52 @@
+name: Verify CCOverT
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install declared dependencies
+        run: |
+          npm ci
+          python -m pip install -r services/model-api/requirements.txt
+          python -m pip install pip-audit==2.7.3
+      - name: TypeScript and formatting checks
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run format:check
+          git diff --check
+      - name: Unit and API tests
+        run: |
+          npm test
+          npm run test:model
+      - name: Build
+        run: npm run build
+      - name: Real model contract smoke test
+        env:
+          MODEL_SERVICE_TOKEN: ci-model-service-token-0123456789abcdef
+          NODE_ENV: test
+        run: |
+          python -m uvicorn ccover_model.api:app --app-dir services/model-api --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/ready -H "x-service-token: $MODEL_SERVICE_TOKEN" && break || sleep 1; done
+          npm run smoke:model
+      - name: Dependency audit
+        run: |
+          npm audit --audit-level=high
+          python -m pip_audit -r services/model-api/requirements.txt

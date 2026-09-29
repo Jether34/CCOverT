@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { CreatePredictionResponse, PredictionListResponse } from '@ccovert/shared';
 import { requireAuth, requireVerifiedEmail } from '../middleware/auth';
-import { asyncHandler, badRequest } from '../utils/errors';
+import { AppError, asyncHandler, badRequest, errorMessage } from '../utils/errors';
 import { sameOriginMiddleware } from '../utils/session';
 import { createPredictionSchema, downloadQuerySchema, predictionListQuerySchema } from '../utils/validation';
 import { predictionService } from '../services/predictions';
@@ -22,17 +22,20 @@ export function createPredictionsRouter(): Router {
 
   router.post('/', requireVerifiedEmail, sameOriginMiddleware, asyncHandler(async (request, response) => {
     const body = createPredictionSchema.parse(request.body);
-    if (request.user!.role === 'user' && (body.sstDatasetId || body.tourismDatasetId)) {
-      throw badRequest('Dataset selection is managed by the researcher in the active model configuration');
-    }
-    const result: CreatePredictionResponse = await predictionService.create({
+    const isClientUser = request.user!.role === 'client' || request.user!.role === 'user';
+    const profile = body.profile;
+    const forecastEndYear = body.forecastEndYear ?? body.baselineYear + body.horizonYears;
+    const horizonYears = forecastEndYear - body.baselineYear;
+    const predictionRequest = {
       userId: request.user!.id,
       request: {
         studyAreaId: body.studyAreaId,
         scope: body.scope,
-        profile: body.profile,
+        profile,
         baselineYear: body.baselineYear,
-        horizonYears: body.horizonYears,
+        predictionStartYear: body.baselineYear,
+        horizonYears,
+        forecastEndYear,
         coralBaseline: {
           coverPercent: body.coralBaseline.coverPercent,
           year: body.coralBaseline.year,
@@ -40,6 +43,7 @@ export function createPredictionsRouter(): Router {
           softCoralPercent: body.coralBaseline.softCoralPercent,
           measure: body.coralBaseline.measure,
           surveySource: body.coralBaseline.surveySource,
+          surveyMethod: body.coralBaseline.surveyMethod,
           surveyScope: body.coralBaseline.surveyScope,
           sameScopeConfirmed: body.coralBaseline.sameScopeConfirmed
         },
@@ -58,8 +62,41 @@ export function createPredictionsRouter(): Router {
         assumedValues: body.assumedValues
       },
       idempotencyKey: idempotencyKeyOf(request.get('idempotency-key') ?? undefined)
-    });
-    response.status(result.replayed ? 200 : 201).json(result);
+    };
+    try {
+      if (isClientUser && (body.sstDatasetId || body.tourismDatasetId)) {
+        throw badRequest('Dataset selection is managed by the researcher in the active model configuration');
+      }
+      if (isClientUser && body.profile !== 'paper-reproduction') {
+        const configured = await db.findActiveModelConfig();
+        const configuredEndYear = configured ? configured.baselineYear + configured.horizonYears : null;
+        const withinWindow = configured && configuredEndYear !== null
+          && body.baselineYear >= configured.baselineYear
+          && body.baselineYear < configuredEndYear
+          && forecastEndYear <= configuredEndYear;
+        if (!configured || !withinWindow || body.coralBaseline.coverPercent !== configured.initialCoverPercent || body.coralBaseline.year !== configured.initialCoverYear) {
+          throw badRequest('This profile requires a coral-cover baseline and forecast window supplied by the active researcher configuration. Select a configured start year and a forecast end year within that profile.', 'PROFILE_FORECAST_WINDOW_INVALID');
+        }
+      }
+      const result: CreatePredictionResponse = await predictionService.create(predictionRequest);
+      response.status(result.replayed ? 200 : 201).json(result);
+    } catch (error) {
+      const failed = await predictionService.recordFailure({
+        userId: predictionRequest.userId,
+        request: predictionRequest.request,
+        idempotencyKey: predictionRequest.idempotencyKey,
+        reason: error instanceof AppError ? error.message : 'The prediction service could not complete this run.'
+      });
+      const appError = error instanceof AppError ? error : null;
+      response.status(appError?.status ?? 502).json({
+        error: {
+          code: appError?.code ?? 'MODEL_SERVICE_ERROR',
+          message: appError ? errorMessage(appError) : 'The prediction service could not complete this run.',
+          requestId: request.requestId
+        },
+        prediction: toPublicRecord(failed)
+      });
+    }
   }));
 
   router.get('/', requireAuth, asyncHandler(async (request, response) => {

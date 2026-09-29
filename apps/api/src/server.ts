@@ -4,6 +4,7 @@ import { config } from './config';
 import { modelConfigService } from './services/modelConfigService';
 import { logger } from './logger';
 import { ensureBootstrapUsers } from './services/bootstrapUsers';
+import { runMigrations } from './services/migrations';
 
 // A concrete instance, never the `db` proxy: `createApp` hands this to
 // `useDatabase`, and registering the proxy would make it resolve through
@@ -12,6 +13,7 @@ const database = new Database();
 
 async function start(): Promise<void> {
   await database.connect();
+  await runMigrations(database);
   // `createApp` registers this instance as the shared `db` handle, and the
   // services read that handle. It must therefore be built before anything asks
   // the database a question, including the seed.

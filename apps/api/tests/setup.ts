@@ -27,3 +27,7 @@ process.env.ENVIRONMENTAL_PROVIDER = 'disabled';
 process.env.SMTP_HOST = '';
 process.env.SMTP_USER = '';
 process.env.SMTP_PASS = '';
+process.env.DEV_VERIFICATION_ENABLED = 'true';
+process.env.LOGIN_OTP_ENABLED = 'false';
+process.env.RECAPTCHA_REQUIRED = 'false';
+process.env.RECAPTCHA_SECRET_KEY = '';

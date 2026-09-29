@@ -21,6 +21,8 @@ Two parameters are not specified in the attachment: `alpha` (thermal mortality) 
 - The target is `%LCC (HC+SC)`; separate hard-coral and soft-coral targets are not offered.
 - Air temperature is never substituted for SST, and no current-time value is used as an annual predictor.
 - A configured environmental provider alone does not make the model ready.
+- A dataset is never validated by parsing it. Only an admin review can set `validated`, and only against a series that already carries its provenance.
+- A configuration version is never reviewed by its author. Publication and independent sign-off are separate, separately authorised acts.
 - A configured AI provider can explain authorized records but cannot change numerical outputs.
 - A derived `g` from an imported series is informational. It never overrides the configured value inside a run; adopting it creates a new, reviewed configuration version.
 - Replacing a configured `T0`, `gamma`, or `V0` with an imported series adds a visible warning to the stored run instead of changing the model silently.
@@ -46,6 +48,18 @@ The constraints that keep this from being a silent default still hold:
 - The reported MAE of 0.30 cannot be reproduced: Table 4 and Table 5 disagree about the 2006 observed cover, and the arithmetic in the appendix does not reconstruct the printed error.
 - The appendix PAGASA pages are meteorological-station air temperature, not a verified sea-surface-temperature series, and no conversion is documented.
 - Reef-site observations are not interchangeable with the citywide scope the model is defined for, so they are excluded from model inputs.
+
+## Readiness gates and how they are satisfied
+
+Two structural gaps previously made the paper profile unreachable. Both are now closed, and the gates below are real rather than aspirational.
+
+- **Dataset validation is admin-only.** `importCsv` always stores `needs-review`; a client-supplied `validated` is accepted by request validation and then discarded, so parsing success can never be mistaken for scientific review. `POST /api/v1/data-imports/:id/review` (`requireRole('admin')` plus same-origin) is the only path that sets `validated`, `needs-review`, or `rejected`. It requires a written note, records the reviewing admin and timestamp, and refuses `validated` unless the series already carries a citation, a named provider, a SHA-256 checksum, citywide annual-average scope, at least two observations, and — for SST — a source that is not station air temperature.
+- **Independent configuration review is a separate act by a different person.** `POST /api/v1/model/versions` still refuses `reviewStatus: 'reviewed'`, so publication and sign-off can never be the same action. `POST /api/v1/model/versions/review` publishes a *new* version carrying `reviewStatus: 'reviewed'`, `reviewedBy`, and `reviewedVersion`, because published versions are immutable. It refuses the author of the version under review, refuses a version that already has a review successor, and requires a written note.
+- **A review does not launder a provisional value.** Reviewing attests to the version as published; `provisional`, `assumed`, and `synthetic-demo-only` parameters keep their status, so `paperReadiness` continues to report `K` and `beta` until an author republishes them as configured and a different reviewer signs off again.
+
+Reaching a research-ready paper profile therefore requires a reviewed SST series, a reviewed citywide arrivals series covering the baseline year, a published configuration with every parameter configured, and an independent review of that version. No step fabricates a scientific judgement.
+
+`services/model-api/ccover_model/validation.py` implements the independent-evaluation capability this depends on — a time-split holdout, three baselines, rolling origins restricted to training years, bounded nonlinear least squares for `alpha` and `beta`, and bootstrap 95% intervals — and is now reachable at `POST /model/validate` behind the service token. It reports metrics and exploratory fits and marks nothing validated; the endpoint refuses to fit a missing parameter and refuses to fit `alpha` when the thermal term never activates, because `alpha` is then unidentifiable. A fitted value still has to be adopted through a reviewed configuration version.
 
 ## Data limitations
 

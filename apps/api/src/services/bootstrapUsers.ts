@@ -16,10 +16,10 @@ export async function ensureBootstrapUsers(database: Database = db): Promise<voi
       if (!normalized) continue;
       const existing = await database.findUserByEmail(normalized);
       if (existing) {
-        if (existing.role !== account.role || !existing.emailVerified) {
-          await database.updateUser(existing.id, { role: account.role, emailVerified: true });
-          logger.info('Updated bootstrap account role', { email: normalized, role: account.role });
-        }
+        // Never promote an account that claimed an allowlisted address through
+        // public signup. Existing accounts require an explicit admin review.
+        if (existing.role !== account.role || !existing.emailVerified)
+          logger.warn('Existing bootstrap address requires manual access review', { userId: existing.id, role: existing.role });
         continue;
       }
       await database.createUser({

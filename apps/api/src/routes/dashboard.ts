@@ -19,6 +19,7 @@ export function createDashboardRouter(database: Database): Router {
     const readiness = await modelConfigService.readiness();
     const { parameters, missing } = readiness;
     const active = await modelConfigService.getActive();
+    const paperReadiness = await modelConfigService.paperReadiness(active);
     const serviceAvailable = await modelClient.isAvailable();
     // Versions are reported only when the model service actually answered, so
     // the dashboard can never claim a version the service did not confirm.
@@ -34,9 +35,10 @@ export function createDashboardRouter(database: Database): Router {
       }
     }
     const [predictionCount, aiReportCount, datasetCount] = await Promise.all([
-      // Validated runs only: demo and scenario records are exploratory and are
-      // not counted as predictions of record.
-      db.countValidatedPredictions(userId),
+      // This is a saved-run count, not a validated-finding count. Refused,
+      // demo, scenario, and paper-reproduction attempts remain visible in the
+      // user's history and must be reflected in the dashboard counter.
+      db.countPredictions(userId),
       db.countAiReports(userId),
       database.listDatasets({}).then((records) => records.length)
     ]);
@@ -60,7 +62,7 @@ export function createDashboardRouter(database: Database): Router {
       historySnapshot: records.map(toPublicRecord),
       modelStatus: {
         service: serviceAvailable ? 'available' : 'unavailable',
-        configured: missing.length === 0,
+        configured: paperReadiness.ready,
         equationVersion,
         modelVersion,
         activeModelConfigVersion: readiness.version,
@@ -71,6 +73,9 @@ export function createDashboardRouter(database: Database): Router {
           note: parameter.notes
         })),
         provisionalParameters: readiness.provisional,
+        unreviewedParameters: parameters.filter((parameter) => parameter.reviewStatus !== 'reviewed').map((parameter) => parameter.key),
+        disputedParameters: parameters.filter((parameter) => parameter.reviewStatus === 'disputed').map((parameter) => parameter.key),
+        dataGaps: paperReadiness.reasons,
         activeProfile: readiness.profile,
         demoProfileAvailable: await modelConfigService.demoAvailable(),
         scenarioProfileAvailable: true as const,
@@ -78,9 +83,9 @@ export function createDashboardRouter(database: Database): Router {
         solver: active?.solver ?? SOLVER_DEFAULTS,
         studyArea: STUDY_AREA,
         paperConflicts: PAPER_CONFLICTS,
-        message: missing.length > 0
-          ? `Not configured: ${missing.map((parameter) => parameter.key).join(', ')}.`
-          : 'Configured.'
+        message: !paperReadiness.ready
+          ? 'Paper profile not configured: missing, provisional, or unreviewed research inputs remain.'
+          : 'All parameter values are present and reviewed; confirm source datasets and independent validation separately.'
       },
       emailVerified: request.user!.emailVerified
     };

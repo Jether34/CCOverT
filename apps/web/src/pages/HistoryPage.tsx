@@ -5,7 +5,7 @@ import { SCENARIO_LABEL } from '@ccovert/shared';
 import { downloadPrediction, getErrorMessage, predictionsApi } from '../lib/api';
 import { AppShell, PageHeader } from '../components/AppShell';
 import { EmptyState, LoadingState, Notice } from '../components/States';
-import { AnnualSeriesChart, AnnualTable, ConditionBadge, ParameterTable, PredictionSummaryCard, SourceTable, WarningList } from '../components/ReferenceChart';
+import { AnnualSeriesChart, AnnualTable, ComputationBreakdownTable, ConditionBadge, MathematicalBreakdown, ParameterTable, PredictionSummaryCard, SourceTable } from '../components/ReferenceChart';
 
 export function HistoryPage(): JSX.Element {
   const [params, setParams] = useSearchParams();
@@ -47,7 +47,7 @@ export function HistoryPage(): JSX.Element {
 
   return (
     <AppShell>
-      <div className="page-container">
+      <div className="page-container history-page">
         <PageHeader
           eyebrow="Saved runs"
           title="Prediction history"
@@ -83,16 +83,16 @@ export function HistoryPage(): JSX.Element {
                 <div className="panel-heading">
                   <div>
                     <p className="eyebrow">Run detail</p>
-                    <h2>{selected.baselineYear}-{selected.baselineYear + selected.horizonYears} &middot; {selected.finalCoverPercent.toFixed(2)}%</h2>
+                    <h2>{selected.baselineYear}-{selected.forecastEndYear ?? selected.baselineYear + selected.horizonYears} &middot; {selected.status === 'unavailable' ? 'Not completed' : `${selected.finalCoverPercent.toFixed(2)}%`}</h2>
                   </div>
                   <div className="button-row">
                     <button className="button button-small button-secondary" type="button" onClick={() => { setSelected(null); setParams({}, { replace: true }); }}>Close details</button>
-                    <button className="button button-small button-secondary" type="button" onClick={() => downloadPrediction(selected.predictionId, 'markdown')}>Markdown</button>
+                    <button className="button button-small button-secondary" type="button" onClick={() => downloadPrediction(selected.predictionId, 'pdf')}>PDF</button>
                     <button className="button button-small button-secondary" type="button" onClick={() => downloadPrediction(selected.predictionId, 'csv')}>CSV</button>
-                    <button className="button button-small button-secondary" type="button" onClick={() => downloadPrediction(selected.predictionId, 'json')}>JSON</button>
                     <Link className="button button-small button-primary" to={`/ai?prediction=${selected.predictionId}`}>Generate report</Link>
                   </div>
                 </div>
+                <div className="history-detail-scroll">
                 <p className="muted">Request id {selected.requestId}. Configuration {selected.modelConfigVersion}. Created {new Date(selected.createdAt).toLocaleString()}.</p>
                 {selected.isDemo && <Notice tone="danger" title="Synthetic DEMO run">This result used synthetic alpha and g values. It must never be cited as a finding.</Notice>}
                 {selected.isScenario && <Notice tone="danger" title={SCENARIO_LABEL}>This run substituted analyst-assumed values for parameters the paper does not publish. It is excluded from validated counts and must not be cited as a finding.</Notice>}
@@ -120,21 +120,44 @@ export function HistoryPage(): JSX.Element {
                     </div>
                   </>
                 )}
-                <WarningList warnings={selected.warnings} />
+                {selected.status === 'unavailable' && <Notice tone="danger" title="Prediction not completed">{selected.failureReason ?? 'The model did not produce an output for this attempt.'} This attempt is retained for traceability; it is not a prediction result.</Notice>}
                 <dl className="detail-list">
                   <div><dt>Status</dt><dd><ConditionBadge label={selected.status} status={selected.status === 'computed' ? 'good' : 'warning'} /></dd></div>
                   <div><dt>Target measure</dt><dd>{selected.targetMeasure}</dd></div>
                   <div><dt>Scope</dt><dd>{selected.scope}</dd></div>
                   <div><dt>Baseline</dt><dd>{selected.initialCoverPercent.toFixed(3)}% in {selected.baselineYear} ({selected.request.coralBaseline.surveySource})</dd></div>
+                  <div><dt>Forecast ending year</dt><dd>{selected.forecastEndYear ?? selected.baselineYear + selected.horizonYears} ({selected.horizonYears} years)</dd></div>
                   <div><dt>Final interval mean</dt><dd>{selected.finalIntervalMeanPercent.toFixed(3)}%</dd></div>
                   <div><dt>Solver</dt><dd>{selected.solver.method.toUpperCase()}, {selected.solver.substepsPerYear} substeps per year, {selected.solver.intervalMeanQuadrature} means</dd></div>
                   <div><dt>Idempotency key</dt><dd>{selected.idempotencyKey ?? 'not supplied'}</dd></div>
                   <div><dt>Consented location</dt><dd>{selected.request.consentedLocation ? 'stored as context only' : 'none'}</dd></div>
                 </dl>
 
-                <AnnualSeriesChart prediction={selected} />
+                <h3>Mathematical computation</h3>
+                <p className="muted">The stored run uses dC/dt = rC(1 − C/K) − α max(0, T(t) − Tcrit)C − βV(t)C, with T(t) = T0 + γt and V(t) integrated continuously from the selected baseline year.</p>
+                <dl className="detail-list">
+                  <div><dt>Profile baseline</dt><dd>{selected.initialCoverPercent.toFixed(2)}% live coral cover at {selected.baselineYear}</dd></div>
+                  <div><dt>Configuration baseline</dt><dd>{selected.modelConfigBaselineYear ?? selected.baselineYear}</dd></div>
+                  <div><dt>Equation / model</dt><dd>{selected.equationVersion} / {selected.modelVersion}</dd></div>
+                </dl>
+                {selected.tourismGrowthPeriods && selected.tourismGrowthPeriods.length > 0 && (
+                  <div className="table-wrap">
+                    <table>
+                      <caption>Tourism growth periods used by this run</caption>
+                      <thead><tr><th>Start year</th><th>End year</th><th>g</th><th>Unit</th></tr></thead>
+                      <tbody>{selected.tourismGrowthPeriods.map((period) => <tr key={`${period.startYear}-${period.endYear}`}><td>{period.startYear}</td><td>{period.endYear}</td><td>{period.growthRate}</td><td>{period.unit}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                )}
+
+                <h3>Computation breakdown by year</h3>
+                <p className="muted">Each row preserves the solver inputs, state values, environmental drivers, rate terms, and percentage-point contributions used for that year.</p>
+                {selected.status !== 'unavailable' && <ComputationBreakdownTable annual={selected.annual} />}
+                {selected.status !== 'unavailable' && <MathematicalBreakdown prediction={selected} />}
+
+                {selected.status !== 'unavailable' && <><AnnualSeriesChart prediction={selected} />
                 <h3>Annual output</h3>
-                <AnnualTable annual={selected.annual} />
+                <AnnualTable annual={selected.annual} /></>}
                 <h3>Parameters</h3>
                 <ParameterTable parameters={selected.parameters} />
                 <h3>Sources</h3>
@@ -144,9 +167,7 @@ export function HistoryPage(): JSX.Element {
                 {reports.length === 0
                   ? <p className="muted">No report has been generated for this run yet.</p>
                   : <ul className="reference-list">{reports.map((report) => <li key={report.id}>{report.title} ({report.generatedBy})</li>)}</ul>}
-
-                <h3>Request</h3>
-                <pre className="calculation-rule">{JSON.stringify(selected.request, null, 2)}</pre>
+                </div>
               </section>
             )}
           </>

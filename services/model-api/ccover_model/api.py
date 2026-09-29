@@ -32,6 +32,7 @@ from .parameters import (
     CONDITION_CONVENTION,
     DEMO_PROFILE,
     DEMO_SYNTHETIC_PARAMETERS,
+    PAPER_REPRODUCTION_LABEL,
     EQUATION_SOURCE,
     EQUATION_VERSION,
     MODEL_VERSION,
@@ -47,7 +48,9 @@ from .schemas import (
     PredictRequest,
     PredictResponse,
     SolverEcho,
+    ValidationRequest,
 )
+from .validation import evaluate_time_split, fit_alpha_beta_g
 
 SERVICE_TOKEN_HEADER = "x-service-token"
 REQUEST_ID_HEADER = "x-request-id"
@@ -83,7 +86,7 @@ def _configured_service_token() -> str:
 
 
 def _demo_profile_allowed() -> bool:
-    if (os.getenv("NODE_ENV") or "development").strip().lower() == "production":
+    if (os.getenv("NODE_ENV") or "development").strip().lower() in {"production", "staging"}:
         return False
     return _env_flag("MODEL_ALLOW_DEMO_PROFILE", False)
 
@@ -246,6 +249,7 @@ def _resolved_parameters(request: PredictRequest) -> tuple[ModelParameters, dict
             **values,
             "alpha": 0.0,
             "baselineYear": request.baseline_year,
+            "tourismGrowthPeriods": [period.model_dump(by_alias=True) for period in request.tourism_growth_periods],
         })
         if thermal_term_inactive_for_horizon(candidate, request.horizon_years):
             # This zero is an explicit mathematical consequence of an inactive
@@ -253,7 +257,11 @@ def _resolved_parameters(request: PredictRequest) -> tuple[ModelParameters, dict
             values["alpha"] = 0.0
             alpha_not_required = True
 
-    return ModelParameters.from_mapping({**values, "baselineYear": request.baseline_year}), values, alpha_not_required
+    return ModelParameters.from_mapping({
+        **values,
+        "baselineYear": request.baseline_year,
+        "tourismGrowthPeriods": [period.model_dump(by_alias=True) for period in request.tourism_growth_periods],
+    }), values, alpha_not_required
 
 
 def _parameter_echo(
@@ -354,6 +362,13 @@ def predict(
         warnings.append("No source metadata was supplied with this run; the parameter provenance is all that is recorded.")
     if body.profile == "demo":
         warnings.append(demo_profile_warning())
+    if body.profile == "paper-reproduction":
+        warnings.extend([
+            PAPER_REPRODUCTION_LABEL,
+            "Paper-reproduction uses alpha = 0.05 per degree Celsius per year and the configured piecewise tourism growth periods.",
+            "C0 = 57% in 2006 is the selected paper-reproduction baseline; the paper also reports conflicting values of 57.25% and 45.83%.",
+            "K and beta are provisional/inferred and this result is not independently validated or 100% accurate.",
+        ])
     if alpha_not_required:
         warnings.append(
             "Alpha was not numerically required for this horizon: sea-surface temperature never exceeds Tcrit, "
@@ -386,12 +401,15 @@ def predict(
         profile=body.profile,
         is_demo=body.profile == "demo",
         is_scenario=body.profile == "scenario",
+        is_paper_reproduction=body.profile == "paper-reproduction",
+        alpha_resolution="inactive-for-horizon" if alpha_not_required else "explicit",
         target_measure=body.coral_baseline.measure,
         study_area_id=body.study_area_id,
         study_area_label=body.study_area_label,
         scope=body.scope,
         baseline_year=body.baseline_year,
         horizon_years=body.horizon_years,
+        forecast_end_year=body.forecast_end_year or body.baseline_year + body.horizon_years,
         initial_cover_percent=result.initial_cover_percent,
         final_cover_percent=result.final_cover_percent,
         final_interval_mean_percent=result.final_interval_mean_percent,
@@ -412,8 +430,80 @@ def predict(
         warnings=list(dict.fromkeys(warnings)),
         conditions=body.condition_bands,
         missing_parameters=[],
+        tourism_growth_periods=body.tourism_growth_periods,
     )
     return response
+
+
+@app.post("/model/validate")
+def validate_run(
+    body: ValidationRequest,
+    request: Request,
+    x_service_token: Optional[str] = Header(default=None),
+) -> Any:
+    """
+    Independent time-based evaluation and exploratory fitting.
+
+    Returns holdout metrics against three baselines, rolling-origin metrics
+    restricted to training years, bounded nonlinear least-squares fits for alpha
+    and beta, and bootstrap 95% intervals. It never marks anything validated.
+    """
+
+    require_service_token(x_service_token)
+    values: dict[str, Optional[float]] = {
+        key: body.parameters[key].value if key in body.parameters else None for key in REQUIRED_PARAMETER_KEYS
+    }
+    missing = sorted(key for key, value in values.items() if value is None)
+    if missing:
+        raise ParametersNotConfiguredError(
+            [
+                {
+                    "key": key,
+                    "reason": "Independent evaluation needs an explicit starting value; the service will not fit a missing parameter.",
+                }
+                for key in missing
+            ]
+        )
+    parameters = ModelParameters.from_mapping({**values, "baselineYear": body.baseline_year})
+    # The fit is restricted to training years. Later observations are held back
+    # for the holdout metrics so they can never influence a fitted value.
+    training_cover = [point for point in body.coral_cover.points if point[0] <= body.train_end_year]
+    training_tourism = [point for point in body.tourism.points if point[0] <= body.train_end_year]
+    fit = fit_alpha_beta_g(
+        parameters,
+        training_cover,
+        training_tourism,
+        body.train_end_year,
+        body.training_dataset_version,
+        bootstrap_samples=body.bootstrap_samples,
+        seed=body.seed,
+    )
+    holdout = evaluate_time_split(
+        parameters,
+        body.coral_cover.points,
+        body.train_end_year,
+        body.validation_dataset_version,
+    )
+    return {
+        "equationVersion": EQUATION_VERSION,
+        "modelVersion": MODEL_VERSION,
+        "requestId": body.request_id or _request_id(request),
+        "studyAreaId": body.study_area_id,
+        "fitting": fit,
+        "holdout": holdout,
+        "dataProvenance": {
+            "coralCover": {"label": body.coral_cover.label, "yearCount": len(body.coral_cover.points)},
+            "tourism": {"label": body.tourism.label, "yearCount": len(body.tourism.points)},
+            "trainingDatasetVersion": body.training_dataset_version,
+            "validationDatasetVersion": body.validation_dataset_version,
+        },
+        "status": "metrics and exploratory fits only; nothing is marked validated or reviewed",
+        "warnings": [
+            "Fitted alpha, beta, and g are not paper values. Adopting one requires a new reviewed model configuration version.",
+            "Bootstrap intervals describe fit sampling variation, not structural model uncertainty; fixed inputs such as K retain their own uncertainty.",
+            "A holdout metric is not evidence of predictive validity until the validation series is independent and documented.",
+        ],
+    }
 
 
 @app.post("/model/calibrate")

@@ -7,6 +7,7 @@ const navItems = [
   { to: '/predict', label: 'Predict', icon: 'query_stats' },
   { to: '/history', label: 'History', icon: 'history' },
   { to: '/ai', label: 'Reports', icon: 'auto_awesome' },
+  { to: '/guide', label: 'Guide and FAQ', icon: 'help_outline' },
   { to: '/settings', label: 'Settings', icon: 'settings' }
 ];
 
@@ -17,9 +18,8 @@ export function PublicHeader(): JSX.Element {
   return (
     <header className="site-header">
       <div className="header-inner">
-        <Link className="brand" to="/" aria-label="CCOverT home"><span className="brand-mark" aria-hidden="true">~%^</span><span>CCOverT</span></Link>
+        <Link className="brand" to="/" aria-label="CCOverT home"><span className="brand-mark" aria-hidden="true">C%</span><span>CCOverT</span></Link>
         <nav className="public-nav" aria-label="Public navigation">
-          <Link to="/#research">Research</Link>
           {user ? <Link className="button button-small" to="/home">Open app</Link> : <><Link to="/login">Log in</Link><Link className="button button-small" to="/signup">Create account</Link></>}
         </nav>
       </div>
@@ -48,7 +48,7 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
     <div className="app-frame">
       <header className="site-header app-header">
         <div className="header-inner">
-          <Link className="brand" to="/home"><span className="brand-mark" aria-hidden="true">~%^</span><span>CCOverT</span></Link>
+          <Link className="brand" to="/home"><span className="brand-mark" aria-hidden="true">C%</span><span>CCOverT</span></Link>
           <div className="header-actions">
             <button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${user?.preferences.theme === 'dark' ? 'light' : 'dark'} mode`} title="Toggle theme">
               <span className="material-symbols-rounded" aria-hidden="true">{user?.preferences.theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
@@ -65,7 +65,7 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
           </NavLink>
         ))}
       </nav>
-      {!user?.emailVerified && (
+      {!user?.emailVerified && (user?.role === 'client' || user?.role === 'user') && (
         <div className="verification-banner" role="status">
           Verify your email to unlock saved predictions, data import, and reports. <Link to="/settings">Open settings</Link>
         </div>

@@ -38,6 +38,7 @@ export interface UserRecord {
   preferences: UserPreferences;
   createdAt: string;
   disabledAt?: string | null;
+  lastVerifiedLoginIp?: string | null;
 }
 
 export interface SmtpOverride {
@@ -53,7 +54,7 @@ export interface SmtpOverride {
 export interface VerificationTokenRecord {
   _id: string;
   userId: string;
-  purpose: 'email-verification' | 'password-reset';
+  purpose: 'email-verification' | 'password-reset' | 'login-otp';
   tokenHash: string;
   expiresAt: string;
   usedAt: string | null;
@@ -80,8 +81,22 @@ export interface EnvironmentalDatasetRecord {
   status: DatasetValidationStatus;
   ownerId: string | null;
   createdAt: string;
+  checksumSha256?: string;
   derivedValue: DerivedValue | null;
   updatedAt?: string;
+  /**
+   * Set only by the admin review endpoint. `importCsv` never writes it, which is
+   * why an imported series cannot claim to be validated on its own.
+   */
+  review?: DatasetReviewRecord | null;
+}
+
+export interface DatasetReviewRecord {
+  status: DatasetValidationStatus;
+  reviewedById: string;
+  reviewedByLabel: string;
+  notes: string;
+  reviewedAt: string;
 }
 
 export interface PredictionRecordStored {
@@ -89,20 +104,27 @@ export interface PredictionRecordStored {
   id: string;
   userId: string;
   status: PredictionStatus;
+  validationStatus?: 'not-validated' | 'independently-validated';
   isDemo: boolean;
   /** True for an exploratory run built on analyst-assumed parameters. */
   isScenario: boolean;
+  isPaperReproduction?: boolean;
+  alphaResolution?: 'explicit' | 'inactive-for-horizon';
+  tourismGrowthPeriods?: PredictionResponse['tourismGrowthPeriods'];
   /** The assumed values this run depends on; empty for paper and demo runs. */
   assumptions: PredictionResponse['assumptions'];
   requestId: string;
   equationVersion: string;
   modelVersion: string;
   modelConfigVersion: string;
+  modelConfigBaselineYear?: number;
   targetMeasure: string;
   studyArea: PredictionResponse['studyArea'];
   scope: StudyAreaScope;
   baselineYear: number;
+  predictionStartYear?: number;
   horizonYears: number;
+  forecastEndYear?: number;
   initialCoverPercent: number;
   finalCoverPercent: number;
   finalIntervalMeanPercent: number;
@@ -114,6 +136,7 @@ export interface PredictionRecordStored {
   solver: PredictionResponse['solver'];
   sources: SourceRecord[];
   warnings: string[];
+  failureReason?: string | null;
   request: PredictionRequest;
   idempotencyKey: string | null;
   createdAt: string;
@@ -135,7 +158,8 @@ export interface AiReportRecordStored extends AiReport {
 
 const preferencesSchema = new Schema({
   theme: { type: String, enum: ['light', 'dark'], default: 'light' },
-  language: { type: String, enum: ['en', 'fil'], default: 'en' }
+  language: { type: String, enum: ['en', 'fil'], default: 'en' },
+  paperSite: { type: String, default: null }
 }, { _id: false });
 
 const userSchema = new Schema({
@@ -143,8 +167,9 @@ const userSchema = new Schema({
   email: { type: String, required: true, unique: true, index: true },
   passwordHash: { type: String, required: true },
   emailVerified: { type: Boolean, required: true, default: false },
-  role: { type: String, enum: ['user', 'researcher', 'admin'], default: 'user', index: true },
+  role: { type: String, enum: ['client', 'user', 'researcher', 'admin'], default: 'client', index: true },
   disabledAt: { type: String, default: null },
+  lastVerifiedLoginIp: { type: String, default: null },
   preferences: { type: preferencesSchema, required: true },
   createdAt: { type: Date, required: true }
 }, { collection: 'users' });
@@ -152,7 +177,7 @@ const userSchema = new Schema({
 const tokenSchema = new Schema({
   _id: { type: String, required: true },
   userId: { type: String, required: true, index: true },
-  purpose: { type: String, enum: ['email-verification', 'password-reset'], required: true },
+  purpose: { type: String, enum: ['email-verification', 'password-reset', 'login-otp'], required: true },
   tokenHash: { type: String, required: true, index: true },
   expiresAt: { type: Date, required: true },
   usedAt: { type: Date, default: null },
@@ -182,6 +207,12 @@ const modelConfigSchema = new Schema({
   profile: { type: String, enum: ['paper', 'demo'], required: true },
   studyAreaId: { type: String, required: true },
   baselineYear: { type: Number, required: true },
+  predictionStartYear: { type: Number, required: true },
+  horizonYears: { type: Number, required: true, default: 10 },
+  forecastEndYear: { type: Number, required: true },
+  initialCoverPercent: { type: Number, required: true, default: 57 },
+  initialCoverYear: { type: Number, required: true, default: 2006 },
+  initialCoverSource: { type: String, required: true, default: 'Researcher-configured baseline; source confirmation required' },
   sstDatasetId: { type: String, default: null },
   tourismDatasetId: { type: String, default: null },
   archivedAt: { type: String, default: null },
@@ -204,6 +235,7 @@ const datasetSchema = new Schema({
   label: { type: String, required: true },
   provider: { type: String, required: true },
   sourceCitation: { type: String, required: true },
+  checksumSha256: { type: String, default: null },
   unit: { type: String, required: true },
   scope: { type: String, required: true },
   spatialCoverage: { type: String, required: true },
@@ -212,7 +244,8 @@ const datasetSchema = new Schema({
   status: { type: String, enum: ['validated', 'needs-review', 'rejected'], required: true },
   ownerId: { type: String, default: null },
   createdAt: { type: Date, required: true },
-  derivedValue: { type: Schema.Types.Mixed, default: null }
+  derivedValue: { type: Schema.Types.Mixed, default: null },
+  review: { type: Schema.Types.Mixed, default: null }
 }, { collection: 'environmentalDatasets' });
 const systemSettingSchema = new Schema({
   _id: { type: String, required: true },
@@ -226,12 +259,14 @@ datasetSchema.index({ kind: 1, studyAreaId: 1, createdAt: -1 });
 const sourceSchema = new Schema({
   name: { type: String, required: true },
   source: { type: String, required: true },
+  provider: { type: String, default: null },
   unit: { type: String, required: true },
   timeWindow: { type: String, required: true },
   coverage: { type: String, default: null },
   scope: { type: String, default: null },
   datasetId: { type: String, default: null },
-  retrievedAt: { type: String, default: null }
+  retrievedAt: { type: String, default: null },
+  checksumSha256: { type: String, default: null }
 }, { _id: false });
 
 const annualSchema = new Schema({
@@ -244,6 +279,9 @@ const annualSchema = new Schema({
   temperatureEndC: { type: Number, required: true },
   tourismStartArrivals: { type: Number, required: true },
   tourismEndArrivals: { type: Number, required: true },
+  tourismGrowthRate: { type: Number, default: null },
+  tourismPeriodStartYear: { type: Number, default: null },
+  tourismPeriodEndYear: { type: Number, default: null },
   growthRateMean: { type: Number, required: true },
   thermalRateMean: { type: Number, required: true },
   tourismRateMean: { type: Number, required: true },
@@ -258,14 +296,19 @@ const predictionSchema = new Schema({
   _id: { type: String, required: true },
   id: { type: String, required: true },
   userId: { type: String, required: true, index: true },
+  validationStatus: { type: String, default: 'not-validated' },
   status: { type: String, required: true },
   isDemo: { type: Boolean, required: true, default: false },
   isScenario: { type: Boolean, required: true, default: false },
+  isPaperReproduction: { type: Boolean, default: false },
+  alphaResolution: { type: String, default: null },
+  tourismGrowthPeriods: { type: [Schema.Types.Mixed], default: [] },
   assumptions: { type: [Schema.Types.Mixed], default: [] },
   requestId: { type: String, required: true },
   equationVersion: { type: String, required: true },
   modelVersion: { type: String, required: true },
   modelConfigVersion: { type: String, required: true, index: true },
+  modelConfigBaselineYear: { type: Number, default: null },
   targetMeasure: { type: String, required: true },
   studyArea: { type: Schema.Types.Mixed, required: true },
   scope: { type: String, required: true },
@@ -282,6 +325,7 @@ const predictionSchema = new Schema({
   solver: { type: Schema.Types.Mixed, required: true },
   sources: { type: [sourceSchema], required: true },
   warnings: { type: [String], required: true },
+  failureReason: { type: String, default: null },
   request: { type: Schema.Types.Mixed, required: true },
   idempotencyKey: { type: String, default: null },
   createdAt: { type: Date, required: true }
@@ -347,7 +391,7 @@ const SystemSettingModel = getModel('SystemSetting', systemSettingSchema);
 /* helpers                                                                     */
 /* -------------------------------------------------------------------------- */
 
-const defaultPreferences = (): UserPreferences => ({ theme: 'light', language: 'en' });
+const defaultPreferences = (): UserPreferences => ({ theme: 'light', language: 'en', paperSite: null });
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const iso = (value: Date | string): string => value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 const isDuplicateKey = (error: unknown): boolean =>
@@ -421,6 +465,17 @@ export class Database {
     return config.useMemoryDb || !config.mongoUri;
   }
 
+  public async isReady(): Promise<boolean> {
+    if (this.isMemory) return true;
+    if (!this.connected || mongoose.connection.readyState !== 1 || !mongoose.connection.db) return false;
+    try {
+      await mongoose.connection.db.admin().ping();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   public async connect(): Promise<void> {
     if (this.connected) return;
     if (this.isMemory) {
@@ -463,8 +518,9 @@ export class Database {
       email: input.email,
       passwordHash: input.passwordHash,
       emailVerified: input.emailVerified ?? false,
-      role: input.role ?? 'user',
+      role: input.role ?? 'client',
       disabledAt: null,
+      lastVerifiedLoginIp: null,
       preferences: input.preferences ?? defaultPreferences(),
       createdAt: now.toISOString()
     };
@@ -761,10 +817,10 @@ export class Database {
   public async countValidatedPredictions(userId: string): Promise<number> {
     if (this.isMemory) {
       return [...this.memory.predictions.values()].filter(
-        (record) => record.userId === userId && !record.isDemo && !record.isScenario
+        (record) => record.userId === userId && !record.isDemo && !record.isScenario && record.validationStatus === 'independently-validated'
       ).length;
     }
-    return PredictionModel.countDocuments({ userId, isDemo: false, isScenario: false }).exec();
+    return PredictionModel.countDocuments({ userId, isDemo: false, isScenario: false, validationStatus: 'independently-validated' }).exec();
   }
 
   /* -- uploads ------------------------------------------------------------ */
@@ -825,6 +881,23 @@ export class Database {
     return { ...(clone(object) as AiReportRecordStored), id: object.id ?? record.id };
   }
 
+  public async invalidateAiReportsForPredictions(userId: string, predictionIds: string[]): Promise<number> {
+    const ids = new Set(predictionIds);
+    if (ids.size === 0) return 0;
+    if (this.isMemory) {
+      let removed = 0;
+      for (const [id, report] of this.memory.aiReports.entries()) {
+        if (report.userId === userId && report.referencedPredictionIds.some((predictionId) => ids.has(predictionId))) {
+          this.memory.aiReports.delete(id);
+          removed += 1;
+        }
+      }
+      return removed;
+    }
+    const result = await AiReportModel.deleteMany({ userId, referencedPredictionIds: { $in: [...ids] } }).exec();
+    return result.deletedCount ?? 0;
+  }
+
   public async findAiReportForUser(id: string, userId: string): Promise<AiReportRecordStored | null> {
     if (this.isMemory) {
       const record = this.memory.aiReports.get(id);
@@ -863,8 +936,9 @@ export class Database {
       email: value.email,
       passwordHash: value.passwordHash,
       emailVerified: value.emailVerified,
-      role: value.role ?? 'user',
+      role: value.role === 'user' ? 'client' : (value.role ?? 'client'),
       disabledAt: value.disabledAt ?? null,
+      lastVerifiedLoginIp: value.lastVerifiedLoginIp ?? null,
       preferences: value.preferences ?? defaultPreferences(),
       createdAt: iso(value.createdAt)
     };

@@ -59,9 +59,6 @@ export function ForgotPasswordPage(): JSX.Element {
         <button className="button button-primary button-wide" type="submit" disabled={pending}>
           {pending ? 'Sending...' : 'Email me a reset link'}
         </button>
-        <p className="auth-switch">
-          Already have a link? <Link to="/reset-password">Set a new password</Link>
-        </p>
       </form>
     </AuthLayout>
   );

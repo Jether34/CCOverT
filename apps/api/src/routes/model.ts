@@ -10,7 +10,7 @@ import {
 import { requireAuth, requireRole } from '../middleware/auth';
 import { asyncHandler, notConfigured } from '../utils/errors';
 import { sameOriginMiddleware } from '../utils/session';
-import { createModelConfigSchema } from '../utils/validation';
+import { createModelConfigSchema, modelConfigReviewSchema, updateActiveModelParametersSchema } from '../utils/validation';
 import { modelConfigService } from '../services/modelConfigService';
 import { modelClient } from '../services/modelClient';
 import { config } from '../config';
@@ -34,6 +34,9 @@ export function createModelRouter(): Router {
   const buildStatus = async (): Promise<ModelStatus> => {
     const readiness = await modelConfigService.readiness();
     const { parameters, missing } = readiness;
+    const unreviewed = parameters.filter((parameter) => parameter.reviewStatus !== 'reviewed').map((parameter) => parameter.key);
+    const disputed = parameters.filter((parameter) => parameter.reviewStatus === 'disputed').map((parameter) => parameter.key);
+    const paperReadiness = await modelConfigService.paperReadiness();
     const serviceAvailable = await modelClient.isAvailable();
     let equationVersion: string | null = null;
     let modelVersion: string | null = null;
@@ -48,7 +51,7 @@ export function createModelRouter(): Router {
     }
     return {
       service: serviceAvailable ? 'available' : 'unavailable',
-      configured: missing.length === 0,
+      configured: paperReadiness.ready,
       equationVersion,
       modelVersion,
       activeModelConfigVersion: readiness.version,
@@ -61,6 +64,9 @@ export function createModelRouter(): Router {
         note: parameter.notes
       })),
       provisionalParameters: readiness.provisional,
+      unreviewedParameters: unreviewed,
+      disputedParameters: disputed,
+      dataGaps: paperReadiness.reasons,
       activeProfile: readiness.profile,
       demoProfileAvailable: await modelConfigService.demoAvailable(),
       // Scenario runs are available to any signed-in user; no env switch gates
@@ -70,8 +76,8 @@ export function createModelRouter(): Router {
       solver: SOLVER_DEFAULTS,
       studyArea: STUDY_AREA,
       paperConflicts: PAPER_CONFLICTS,
-      message: missing.length > 0
-        ? `The model is not configured: ${missing.map((parameter) => parameter.key).join(', ')} ${missing.length === 1 ? 'has' : 'have'} no value. Import a cited dataset and create a model configuration version to enable it.`
+      message: !paperReadiness.ready
+        ? `The paper profile is not configured for validated use: ${paperReadiness.reasons.join('; ')}.`
         : serviceAvailable
           ? 'The model is configured and the internal model service is reachable.'
           : 'The model is configured but the internal model service is not reachable right now.'
@@ -90,12 +96,40 @@ export function createModelRouter(): Router {
     const active = await modelConfigService.getActive();
     response.json({
       activeVersion: active?.version ?? null,
+      baselineYear: active?.baselineYear ?? 2006,
+      horizonYears: active?.horizonYears ?? 10,
+      initialCoverPercent: active?.initialCoverPercent ?? 57,
+      initialCoverYear: active?.initialCoverYear ?? 2006,
+      initialCoverSource: active?.initialCoverSource ?? 'Researcher-configured baseline',
       parameters: active?.parameters ?? PAPER_PARAMETERS,
       solver: active?.solver ?? SOLVER_DEFAULTS
     });
   }));
 
-  router.get('/versions', requireAuth, asyncHandler(async (_request, response) => {
+  router.put('/configuration', requireRole('researcher'), sameOriginMiddleware, asyncHandler(async (request, response) => {
+    const input = updateActiveModelParametersSchema.parse(request.body);
+    const active = await modelConfigService.getActive();
+    if (!active) throw notConfigured('MODEL_PARAMETERS_NOT_CONFIGURED', 'There is no active model configuration to update');
+    const record = await modelConfigService.createVersion({
+      baseVersion: active.version,
+      changes: input.changes as Record<string, number>,
+      notes: input.notes,
+      effectiveDate: new Date().toISOString().slice(0, 10),
+      reviewStatus: 'unreviewed',
+      createdById: request.user!.id,
+      createdByLabel: request.user!.email,
+      baselineYear: active.baselineYear,
+      horizonYears: active.horizonYears,
+      initialCoverPercent: active.initialCoverPercent,
+      initialCoverYear: active.initialCoverYear,
+      initialCoverSource: active.initialCoverSource,
+      sstDatasetId: active.sstDatasetId,
+      tourismDatasetId: active.tourismDatasetId
+    });
+    response.status(201).json({ version: record });
+  }));
+
+  router.get('/versions', requireRole('researcher', 'admin'), asyncHandler(async (_request, response) => {
     response.json({ versions: await modelConfigService.list(50) });
   }));
 
@@ -112,6 +146,22 @@ export function createModelRouter(): Router {
       sourceDatasetIds: input.sourceDatasetIds as Record<string, string> | undefined,
       sstDatasetId: input.sstDatasetId,
       tourismDatasetId: input.tourismDatasetId
+      ,baselineYear: input.baselineYear
+      ,horizonYears: input.horizonYears
+      ,initialCoverPercent: input.initialCoverPercent
+      ,initialCoverYear: input.initialCoverYear
+      ,initialCoverSource: input.initialCoverSource
+    });
+    response.status(201).json({ version: record });
+  }));
+
+  router.post('/versions/review', requireRole('researcher'), sameOriginMiddleware, asyncHandler(async (request, response) => {
+    const input = modelConfigReviewSchema.parse(request.body);
+    const record = await modelConfigService.reviewVersion({
+      version: input.version,
+      notes: input.notes,
+      reviewedById: request.user!.id,
+      reviewedByLabel: request.user!.email
     });
     response.status(201).json({ version: record });
   }));

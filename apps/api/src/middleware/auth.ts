@@ -5,6 +5,9 @@ import { db, type Database } from '../repositories/database';
 import { AppError, forbidden, unauthorized } from '../utils/errors';
 import { readSessionToken } from '../utils/session';
 
+/** Email verification and login codes are client-account controls only. */
+export const requiresEmailVerification = (role: UserRole): boolean => role === 'client' || role === 'user';
+
 export function createAuthMiddleware(database: Database) {
   const requireAuth = async (request: Request, _response: Response, next: NextFunction): Promise<void> => {
     try {
@@ -32,7 +35,7 @@ export function createAuthMiddleware(database: Database) {
         next(error);
         return;
       }
-      if (!request.user?.emailVerified) {
+      if (request.user && requiresEmailVerification(request.user.role) && !request.user.emailVerified) {
         next(new AppError(403, 'EMAIL_NOT_VERIFIED', 'Verify your email before using this feature'));
         return;
       }
@@ -47,6 +50,10 @@ export function createAuthMiddleware(database: Database) {
         return;
       }
       const role = request.user?.role;
+      if (request.user && requiresEmailVerification(request.user.role) && !request.user.emailVerified) {
+        next(new AppError(403, 'EMAIL_NOT_VERIFIED', 'Verify your email before using this feature'));
+        return;
+      }
       if (!role || !roles.includes(role)) {
         next(forbidden(`This action requires one of: ${roles.join(', ')}`));
         return;
@@ -85,7 +92,7 @@ export const requireVerifiedEmail = async (request: Request, response: Response,
       next(error);
       return;
     }
-    if (!request.user?.emailVerified) {
+    if (request.user && requiresEmailVerification(request.user.role) && !request.user.emailVerified) {
       next(new AppError(403, 'EMAIL_NOT_VERIFIED', 'Verify your email before using this feature'));
       return;
     }
@@ -100,6 +107,10 @@ export const requireRole = (...roles: UserRole[]) => async (request: Request, re
       return;
     }
     const role = request.user?.role;
+    if (request.user && requiresEmailVerification(request.user.role) && !request.user.emailVerified) {
+      next(new AppError(403, 'EMAIL_NOT_VERIFIED', 'Verify your email before using this feature'));
+      return;
+    }
     if (!role || !roles.includes(role)) {
       next(forbidden(`This action requires one of: ${roles.join(', ')}`));
       return;

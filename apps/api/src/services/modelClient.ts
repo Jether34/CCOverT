@@ -77,6 +77,9 @@ const annualPointSchema = z.object({
   temperatureEndC: z.number(),
   tourismStartArrivals: z.number(),
   tourismEndArrivals: z.number(),
+  tourismGrowthRate: z.number().default(0),
+  tourismPeriodStartYear: z.number().int().nullable().default(null),
+  tourismPeriodEndYear: z.number().int().nullable().default(null),
   growthRateMean: z.number(),
   thermalRateMean: z.number(),
   tourismRateMean: z.number(),
@@ -178,7 +181,19 @@ const modelMetadataSchema = z.object({
     description: z.string(),
     values: z.record(z.number()),
     status: z.string()
-  })
+  }),
+  paperReproductionProfile: z.object({
+    version: z.string(),
+    label: z.string(),
+    alpha: z.number(),
+    initialCoverPercent: z.number(),
+    initialCoverYear: z.number(),
+    tourismConfigVersion: z.string(),
+    tourismGrowthPeriods: z.array(z.object({
+      startYear: z.number(), endYear: z.number(), growthRate: z.number(), unit: z.string(),
+      provenance: z.string(), reviewStatus: z.string(), effectiveDate: z.string().nullable()
+    }))
+  }).optional()
 });
 
 const predictionSchema = z.object({
@@ -186,16 +201,19 @@ const predictionSchema = z.object({
   modelVersion: z.string().min(1),
   modelConfigVersion: z.string().min(1),
   requestId: z.string().min(1),
-  profile: z.enum(['paper', 'demo', 'scenario']),
+  profile: z.enum(['paper', 'demo', 'scenario', 'paper-reproduction']),
   isDemo: z.boolean(),
   /** True when the caller supplied assumed values for unconfigured parameters. */
   isScenario: z.boolean(),
+  isPaperReproduction: z.boolean().optional(),
+  alphaResolution: z.string().optional(),
   targetMeasure: z.string(),
   studyAreaId: z.string(),
   studyAreaLabel: z.string(),
   scope: z.string(),
   baselineYear: z.number().int(),
   horizonYears: z.number().int(),
+  forecastEndYear: z.number().int().optional(),
   initialCoverPercent: z.number(),
   finalCoverPercent: z.number(),
   finalIntervalMeanPercent: z.number(),
@@ -214,7 +232,16 @@ const predictionSchema = z.object({
     reason: z.string(),
     requiredBy: z.string(),
     note: z.string()
-  }))
+  })),
+  tourismGrowthPeriods: z.array(z.object({
+    startYear: z.number().int(),
+    endYear: z.number().int(),
+    growthRate: z.number(),
+    unit: z.string(),
+    provenance: z.string(),
+    reviewStatus: z.string(),
+    effectiveDate: z.string().nullable()
+  })).optional()
 });
 
 export type ModelMetadata = z.infer<typeof modelMetadataSchema>;
@@ -231,9 +258,10 @@ export interface ModelPredictInput {
   study_area_label: string;
   scope: string;
   consented_location?: ConsentedLocation | null;
-  profile: 'paper' | 'demo' | 'scenario';
+  profile: 'paper' | 'demo' | 'scenario' | 'paper-reproduction';
   baseline_year: number;
   horizon_years: number;
+  forecast_end_year: number;
   coral_baseline: {
     cover_percent: number;
     year: number;
@@ -266,6 +294,15 @@ export interface ModelPredictInput {
   model_config_version: string;
   sources: Record<string, unknown>[];
   request_id?: string;
+  tourism_growth_periods?: Array<{
+    start_year: number;
+    end_year: number;
+    growth_rate: number;
+    unit: string;
+    provenance: string;
+    review_status: string;
+    effective_date: string | null;
+  }>;
 }
 
 const calibrationSchema = z.object({

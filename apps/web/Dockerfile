@@ -1,5 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /app
+ARG VITE_RECAPTCHA_SITE_KEY
+ENV VITE_RECAPTCHA_SITE_KEY=$VITE_RECAPTCHA_SITE_KEY
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json

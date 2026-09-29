@@ -32,6 +32,33 @@ export const datasetUnitHint = (kind: DatasetKind): string => {
   return 'percent';
 };
 
+/**
+ * Normalized (lowercase, alphanumeric-only) header names accepted for the
+ * value column. Matching is `exact || startsWith`, so realistic headers such as
+ * "Sea Surface Temperature (degC)" or "Tourist Arrivals (thousands)" resolve
+ * even though they carry a unit suffix. Longer aliases are listed first so a
+ * specific name wins over a shorter prefix.
+ */
+const VALUE_COLUMN_ALIASES = [
+  'seasurfacetemperature',
+  'seasurfacetemp',
+  'annualtouristarrivals',
+  'annualarrivals',
+  'touristarrivals',
+  'touristarrive',
+  'coralcoverpercent',
+  'coralcover',
+  'coverpercent',
+  'predictionintervalcoverage',
+  'predictioninterval',
+  'tourists',
+  'arrivals',
+  'sstc',
+  'sst',
+  'value',
+  'cover'
+] as const;
+
 /* -------------------------------------------------------------------------- */
 /* CSV import                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -78,7 +105,7 @@ export function parseCsv(text: string, kind: DatasetKind, unit: string): ParsedC
 
   const header = splitCsvLine(lines[0]).map((cell) => cell.toLowerCase().replace(/[^a-z]/g, ''));
   const yearIndex = header.findIndex((cell) => cell === 'year' || cell === 't' || cell === 'tyears' || cell === 'date');
-  const valueIndex = header.findIndex((cell) => ['value', 'sst', 'sstc', 'seasurfaceTemperature'.toLowerCase(), 'touristarrive'.replace(/[^a-z]/g, ''), 'tourists', 'arrivals', 'annualarrivals', 'coverpercent', 'cover', 'coralcover'].includes(cell));
+  const valueIndex = header.findIndex((cell) => VALUE_COLUMN_ALIASES.some((alias) => cell === alias || cell.startsWith(alias)));
   if (yearIndex === -1 || valueIndex === -1) {
     throw unprocessable('The file must have "year" and "value" columns', 'VALIDATION_ERROR', `header was: ${lines[0]}`);
   }
@@ -154,6 +181,15 @@ export class DatasetService {
       throw unprocessable('A source citation is required for every imported series', 'VALIDATION_ERROR');
     }
     if (!input.label.trim()) throw unprocessable('A label is required for every imported series');
+    if (!input.provider.trim() || !input.spatialCoverage.trim()) {
+      throw unprocessable('Provider and spatial coverage are required for every imported series');
+    }
+    if (input.kind === 'sst') {
+      const description = `${input.label} ${input.sourceCitation} ${input.spatialCoverage}`;
+      if (/\bair[ -]?temperature\b|\bweather[ -]?station\b/i.test(description) || !/\bSST\b|sea[ -]?surface[ -]?temperature/i.test(description)) {
+        throw unprocessable('Identify a sea-surface temperature source explicitly; station air temperature cannot be imported as SST');
+      }
+    }
     const parsed = parseCsv(input.text, input.kind, input.unit);
     const warnings = [...parsed.warnings];
     const scope: StudyAreaScope = input.scope;
@@ -163,7 +199,8 @@ export class DatasetService {
     if (input.kind === 'sst' && !/citywide|regional|sea surface|sst/i.test(`${input.label} ${input.spatialCoverage}`)) {
       warnings.push('Confirm this series is sea-surface temperature (SST). The paper rejects air temperature as a substitute.');
     }
-    const status: DatasetValidationStatus = scope === 'citywide-annual-average' ? 'validated' : 'needs-review';
+    // Parsing and shape checks are not independent scientific review.
+    const status: DatasetValidationStatus = 'needs-review';
     if (input.status === 'needs-review') warnings.push('The researcher marked this import as needing review');
 
     const now = new Date().toISOString();
@@ -188,6 +225,7 @@ export class DatasetService {
       status,
       ownerId: input.ownerId,
       createdAt: now,
+      checksumSha256: crypto.createHash('sha256').update(input.text, 'utf8').digest('hex'),
       derivedValue: null
     };
     await db.createDataset(record);
@@ -199,6 +237,63 @@ export class DatasetService {
     });
     recordActivity({ kind: 'change', action: `Imported ${record.kind} dataset ${record.label}`, actorId: input.ownerId });
     return { dataset: this.toPublic(record), warnings };
+  }
+
+  /**
+   * Admin-only scientific review. This is the *only* path that can set
+   * `validated`; `importCsv` always stores `needs-review`. Validation is
+   * refused unless the record carries the provenance a paper-profile run needs,
+   * so an admin cannot rubber-stamp an untraceable series.
+   */
+  public async reviewDataset(input: {
+    datasetId: string;
+    status: DatasetValidationStatus;
+    notes: string;
+    reviewedById: string;
+    reviewedByLabel: string;
+  }): Promise<EnvironmentalDataset> {
+    const dataset = await this.getOrThrow(input.datasetId);
+    if (!input.notes.trim()) {
+      throw unprocessable('A written review note is required for every dataset review', 'VALIDATION_ERROR');
+    }
+    if (input.status === 'validated') {
+      const blockers: string[] = [];
+      if (!dataset.sourceCitation.trim()) blockers.push('a source citation');
+      if (!dataset.provider.trim()) blockers.push('a named provider');
+      if (!dataset.checksumSha256) blockers.push('a content checksum');
+      if (dataset.scope !== 'citywide-annual-average') blockers.push('citywide annual-average scope');
+      if (dataset.records.length < 2) blockers.push('at least two annual observations');
+      if (dataset.kind === 'sst' && /\bair[ -]?temperature\b|\bweather[ -]?station\b/i.test(`${dataset.label} ${dataset.sourceCitation} ${dataset.spatialCoverage}`)) {
+        blockers.push('a source that is not station air temperature');
+      }
+      if (blockers.length > 0) {
+        throw unprocessable(
+          `This series cannot be marked validated: it still needs ${blockers.join(', ')}.`,
+          'VALIDATION_ERROR'
+        );
+      }
+    }
+    const review = {
+      status: input.status,
+      reviewedById: input.reviewedById,
+      reviewedByLabel: input.reviewedByLabel,
+      notes: input.notes.trim(),
+      reviewedAt: new Date().toISOString()
+    };
+    const updated = await db.updateDataset(dataset._id, { status: input.status, review });
+    logger.info('Recorded an administrative dataset review', {
+      datasetId: dataset.id,
+      kind: dataset.kind,
+      from: dataset.status,
+      to: input.status,
+      reviewedBy: input.reviewedByLabel
+    });
+    recordActivity({
+      kind: 'change',
+      action: `Dataset review set ${dataset.kind} series ${dataset.label} to ${input.status}`,
+      actorId: input.reviewedById
+    });
+    return this.toPublic(updated);
   }
 
   public async list(kind?: DatasetKind, studyAreaId?: string): Promise<EnvironmentalDataset[]> {
@@ -220,12 +315,14 @@ export class DatasetService {
     return {
       name: record.label,
       source: record.sourceCitation,
+      provider: record.provider,
       unit: record.unit,
       timeWindow: `${record.temporalCoverage.firstYear}-${record.temporalCoverage.lastYear}`,
       coverage: record.spatialCoverage,
       scope: record.scope,
       datasetId: record.id,
-      retrievedAt: record.createdAt
+      retrievedAt: record.createdAt,
+      checksumSha256: record.checksumSha256 ?? null
     };
   }
 
@@ -245,7 +342,9 @@ export class DatasetService {
       status: record.status,
       ownerId: record.ownerId,
       createdAt: record.createdAt,
-      derivedValue: record.derivedValue ?? null
+      checksumSha256: record.checksumSha256,
+      derivedValue: record.derivedValue ?? null,
+      review: record.review ?? null
     };
   }
 
@@ -343,7 +442,8 @@ export class DatasetService {
       throw notConfigured(MODEL_PARAMETERS_NOT_CONFIGURED, 'No model configuration is active, so a fit has no baseline to work from');
     }
     const derivedValue = await this.estimateGrowthParameter(dataset, active.parameters, active.version);
-    const updated = await db.updateDataset(dataset._id, { derivedValue, status: 'validated' });
+    // A successful estimate does not validate the underlying source dataset.
+    const updated = await db.updateDataset(dataset._id, { derivedValue });
     logger.info('Estimated tourism growth rate g from imported annual arrivals', {
       datasetId,
       g: derivedValue.value,

@@ -5,7 +5,7 @@ import { config } from '../config';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { asyncHandler, badRequest } from '../utils/errors';
 import { sameOriginMiddleware } from '../utils/session';
-import { datasetImportFieldsSchema, datasetListQuerySchema, idSchema } from '../utils/validation';
+import { datasetImportFieldsSchema, datasetListQuerySchema, datasetReviewSchema, idSchema } from '../utils/validation';
 import { datasetService, datasetUnitHint } from '../services/datasets';
 import { makeTemplate, parseWorkbook } from '../services/workbook';
 
@@ -17,13 +17,14 @@ const upload = multer({
 export function createDataImportsRouter(): Router {
   const router = Router();
 
-  router.get('/', requireAuth, asyncHandler(async (request, response) => {
+  // Dataset inventory and provenance are researcher/admin workspace data.
+  router.get('/', requireRole('researcher', 'admin'), asyncHandler(async (request, response) => {
     const query = datasetListQuerySchema.parse(request.query);
     const body: DatasetListResponse = { datasets: await datasetService.list(query.kind, query.studyAreaId) };
     response.json(body);
   }));
 
-  router.get('/schema/:kind', requireAuth, asyncHandler(async (request, response) => {
+  router.get('/schema/:kind', requireRole('researcher', 'admin'), asyncHandler(async (request, response) => {
     const kind = idSchema.parse(request.params.kind);
     response.json({
       kind,
@@ -85,6 +86,21 @@ export function createDataImportsRouter(): Router {
       status: fields.reviewStatus
     });
     response.status(201).json(result);
+  }));
+
+  router.post('/:id/review', requireRole('admin'), sameOriginMiddleware, asyncHandler(async (request, response) => {
+    const datasetId = idSchema.parse(request.params.id);
+    const input = datasetReviewSchema.parse(request.body);
+    // Admin-only: this is the sole path that can set a series to `validated`,
+    // which is what a paper-profile run requires.
+    const dataset = await datasetService.reviewDataset({
+      datasetId,
+      status: input.status,
+      notes: input.notes,
+      reviewedById: request.user!.id,
+      reviewedByLabel: request.user!.email
+    });
+    response.json({ dataset });
   }));
 
   router.post('/:id/estimate-g', requireRole('researcher'), sameOriginMiddleware, asyncHandler(async (request, response) => {

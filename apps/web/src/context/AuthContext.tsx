@@ -6,8 +6,9 @@ import type { ModelStatus } from '@ccovert/shared';
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<User>;
-  signup: (email: string, password: string) => Promise<AuthResponse>;
+  login: (email: string, password: string, captchaToken?: string) => Promise<{ otpRequired: boolean; user?: User; email?: string }>;
+  verifyLoginOtp: (email: string, code: string) => Promise<User>;
+  signup: (email: string, password: string, paperSite?: string, captchaToken?: string) => Promise<AuthResponse>;
   verify: (token: string) => Promise<User>;
   logout: () => Promise<void>;
   updatePreferences: (preferences: UserPreferences) => Promise<void>;
@@ -52,15 +53,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }): JSX.E
     return () => { window.clearInterval(interval); window.removeEventListener('focus', onFocus); };
   }, [refresh]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const result = await authApi.login(email, password);
+  const login = useCallback(async (email: string, password: string, captchaToken?: string) => {
+    const result = await authApi.login(email, password, captchaToken);
+    if (result.user) setUser(result.user);
+    return result;
+  }, []);
+
+  const verifyLoginOtp = useCallback(async (email: string, code: string) => {
+    const result = await authApi.verifyLoginOtp(email, code);
     setUser(result.user);
     return result.user;
   }, []);
 
-  const signup = useCallback(async (email: string, password: string) => {
-    const result = await authApi.signup(email, password);
-    setUser(result.user);
+  const signup = useCallback(async (email: string, password: string, paperSite?: string, captchaToken?: string) => {
+    const result = await authApi.signup(email, password, paperSite, captchaToken);
     return result as AuthResponse;
   }, []);
 
@@ -81,8 +87,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): JSX.E
   }, []);
 
   const authValue = useMemo<AuthContextValue>(
-    () => ({ user, loading, login, signup, verify, logout, updatePreferences }),
-    [loading, login, logout, signup, updatePreferences, user, verify]
+    () => ({ user, loading, login, verifyLoginOtp, signup, verify, logout, updatePreferences }),
+    [loading, login, logout, signup, updatePreferences, user, verify, verifyLoginOtp]
   );
 
   const modelValue = useMemo<ModelContextValue>(

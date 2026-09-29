@@ -170,7 +170,7 @@ beforeAll(async () => {
   await modelConfigService.ensureSeeded();
 
   researcher = request.agent(app);
-  const signup = await researcher.post('/api/v1/auth/signup').send({ email: 'researcher@example.test', password: 'StrongPassword123' });
+  const signup = await researcher.post('/api/v1/auth/signup').send({ email: 'researcher@example.test', password: 'StrongPassword123', paperSite: 'Babuyan' });
   const url = new URL(signup.body.developmentVerificationUrl);
   await researcher.post('/api/v1/auth/verify').send({ token: url.searchParams.get('token') ?? '' });
   await researcher.post('/api/v1/auth/login').send({ email: 'researcher@example.test', password: 'StrongPassword123' });
@@ -214,10 +214,11 @@ const requestBody = (overrides: Record<string, unknown> = {}): Record<string, un
   baselineYear: 2006,
   horizonYears: 10,
   coralBaseline: {
-    coverPercent: 57.25,
+    coverPercent: 57,
     year: 2006,
     measure: '%LCC (HC+SC)',
     surveySource: 'Citywide reef survey 2006',
+    surveyMethod: 'Citywide transect survey',
     surveyScope: 'citywide-annual-average',
     sameScopeConfirmed: true
   },
@@ -229,6 +230,19 @@ const requestBody = (overrides: Record<string, unknown> = {}): Record<string, un
 });
 
 describe('researcher workflow against a contract-double model service', () => {
+  it('rejects self-reviewed publication and invalid parameter ranges before activation', async () => {
+    const status = await researcher.get('/api/v1/model/status');
+    const baseVersion = status.body.status.activeModelConfigVersion as string;
+    const reviewed = await researcher.post('/api/v1/model/versions').send({
+      baseVersion, changes: { alpha: 0.05 }, notes: 'Claiming review without an independent reviewer.', reviewStatus: 'reviewed'
+    });
+    expect(reviewed.status).toBe(403);
+    const invalid = await researcher.post('/api/v1/model/versions').send({
+      baseVersion, changes: { K: 150 }, notes: 'This exceeds the 0–100 cover scale.'
+    });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error.code).toBe('INVALID_MODEL_PARAMETER');
+  });
   it('refuses to run until alpha and g are configured', async () => {
     const blocked = await researcher.post('/api/v1/predictions').send(requestBody());
     expect(blocked.status).toBe(503);
@@ -238,7 +252,7 @@ describe('researcher workflow against a contract-double model service', () => {
 
   it('runs the synthetic demo while the paper profile is incomplete', async () => {
     const demo = request.agent(app);
-    const signup = await demo.post('/api/v1/auth/signup').send({ email: 'incomplete-demo@example.test', password: 'StrongPassword123' });
+    const signup = await demo.post('/api/v1/auth/signup').send({ email: 'incomplete-demo@example.test', password: 'StrongPassword123', paperSite: 'Babuyan' });
     const url = new URL(signup.body.developmentVerificationUrl);
     await demo.post('/api/v1/auth/verify').send({ token: url.searchParams.get('token') ?? '' });
     await demo.post('/api/v1/auth/login').send({ email: 'incomplete-demo@example.test', password: 'StrongPassword123' });
@@ -253,7 +267,7 @@ describe('researcher workflow against a contract-double model service', () => {
 
   it('prevents default users from editing shared research data', async () => {
     const user = request.agent(app);
-    const signup = await user.post('/api/v1/auth/signup').send({ email: 'readonly-user@example.test', password: 'StrongPassword123' });
+    const signup = await user.post('/api/v1/auth/signup').send({ email: 'readonly-user@example.test', password: 'StrongPassword123', paperSite: 'Babuyan' });
     const url = new URL(signup.body.developmentVerificationUrl);
     await user.post('/api/v1/auth/verify').send({ token: url.searchParams.get('token') ?? '' });
     await user.post('/api/v1/auth/login').send({ email: 'readonly-user@example.test', password: 'StrongPassword123' });
@@ -284,7 +298,7 @@ describe('researcher workflow against a contract-double model service', () => {
       enabled: false, host: 'mail.example.test', port: 587, secure: false,
       user: 'mailer', from: 'mail@example.test'
     })).status).toBe(200);
-    const account = await developer.post('/api/v1/developer/users').send({ email: 'added@example.test', password: 'StrongPassword123', role: 'user' });
+    const account = await developer.post('/api/v1/developer/users').send({ email: 'added@example.test', password: 'StrongPassword123', role: 'client' });
     expect(account.status).toBe(201);
     expect((await developer.patch(`/api/v1/developer/users/${account.body.user.id}`).send({ disabled: true })).status).toBe(200);
     expect((await request(app).post('/api/v1/auth/login').send({ email: 'added@example.test', password: 'StrongPassword123' })).status).toBe(401);
@@ -316,7 +330,7 @@ describe('researcher workflow against a contract-double model service', () => {
     expect(received.calibrate).toHaveLength(0);
   });
 
-  it('lets a researcher configure the missing parameters and compute a run', async () => {
+  it('lets a researcher publish unreviewed parameters and run an explicit scenario', async () => {
     const datasetId = (await researcher.get('/api/v1/data-imports?kind=tourism')).body.datasets
       .find((dataset: { label: string }) => dataset.label === 'Citywide tourist arrivals 2006-2016').id as string;
     const sstDatasetId = await importDataset(researcher, 'sst', 'Citywide SST 2006-2016', 'PAGASA sea-surface product fixture', sstCsv);
@@ -328,7 +342,7 @@ describe('researcher workflow against a contract-double model service', () => {
       baseVersion: status.body.status.activeModelConfigVersion,
       changes: { alpha: 0.05, g: 0.02 },
       notes: 'Configured from imported datasets and reviewed against the paper.',
-      reviewStatus: 'reviewed',
+      reviewStatus: 'unreviewed',
       effectiveDate: '2006-01-01',
       sourceDatasetIds: { g: datasetId },
       sstDatasetId,
@@ -339,22 +353,27 @@ describe('researcher workflow against a contract-double model service', () => {
     const configured = version.body.version.parameters.find((parameter: { key: string }) => parameter.key === 'g');
     expect(configured.value).toBe(0.02);
     expect(configured.sourceDatasetId).toBe(datasetId);
-    expect(configured.reviewStatus).toBe('reviewed');
+    expect(configured.reviewStatus).toBe('unreviewed');
 
     const ready = await researcher.get('/api/v1/model/status');
-    expect(ready.body.status.configured).toBe(true);
+    expect(ready.body.status.configured).toBe(false);
     expect(ready.body.status.service).toBe('available');
     expect(ready.body.status.equationVersion).toBe('ccoverT-1.0.0');
 
+    const scenarioRequest = requestBody({ profile: 'scenario', assumedValues: [
+      { key: 'g', value: 0.03, unit: 'per year', rationale: 'Sensitivity test against a higher growth rate.', range: null }
+    ] });
     const prediction = await researcher
       .post('/api/v1/predictions')
       .set('Idempotency-Key', 'run-key-0000000001')
-      .send(requestBody());
+      .send(scenarioRequest);
     expect(prediction.status).toBe(201);
     const record = prediction.body.prediction;
     expect(record.idempotencyKey).toBe('run-key-0000000001');
     expect(record.modelConfigVersion).toBe(version.body.version.version);
     expect(record.isDemo).toBe(false);
+    expect(record.isScenario).toBe(true);
+    expect(record.validationStatus).toBe('not-validated');
     expect(record.annual).toHaveLength(10);
     expect(record.warnings.some((warning: string) => warning.includes('T0 was changed'))).toBe(true);
     expect(record.sources.some((source: { datasetId: string | null }) => source.datasetId === sstDatasetId)).toBe(true);
@@ -368,7 +387,7 @@ describe('researcher workflow against a contract-double model service', () => {
     expect(forwarded.model_config_version).toBeTruthy();
     expect(forwarded.parameters.g.value).toBe(0.02);
     expect(forwarded.parameters.alpha.value).toBe(0.05);
-    computedRequest = requestBody();
+    computedRequest = scenarioRequest;
   });
 
   it('replays an identical idempotent request and rejects a different one', async () => {
@@ -382,16 +401,21 @@ describe('researcher workflow against a contract-double model service', () => {
     const conflicting = await researcher
       .post('/api/v1/predictions')
       .set('Idempotency-Key', 'run-key-0000000001')
-      .send(requestBody({ horizonYears: 20 }));
+      .send({ ...(computedRequest ?? requestBody()), horizonYears: 20 });
     expect(conflicting.status).toBe(409);
     expect(conflicting.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
 
     const list = await researcher.get('/api/v1/predictions');
-    expect(list.body.predictions).toHaveLength(1);
+    expect(list.body.predictions).toHaveLength(2);
   });
 
   it('offers the prediction and its inputs for download', async () => {
     const id = (await researcher.get('/api/v1/predictions')).body.predictions[0].predictionId as string;
+    const pdf = await researcher.get(`/api/v1/predictions/${id}/download`);
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toContain('application/pdf');
+    expect(pdf.body.subarray(0, 5).toString()).toBe('%PDF-');
+
     const markdown = await researcher.get(`/api/v1/predictions/${id}/download?format=markdown`);
     expect(markdown.status).toBe(200);
     expect(markdown.headers['content-type']).toContain('text/markdown');
@@ -408,16 +432,15 @@ describe('researcher workflow against a contract-double model service', () => {
     expect(csv.text).toContain('# sources');
 
     const json = await researcher.get(`/api/v1/predictions/${id}/download?format=json`);
-    expect(json.status).toBe(200);
-    expect(json.body.prediction.id).toBe(id);
+    expect(json.status).toBe(400);
 
     const other = request.agent(app);
-    const signup = await other.post('/api/v1/auth/signup').send({ email: 'nosy@example.test', password: 'StrongPassword123' });
+    const signup = await other.post('/api/v1/auth/signup').send({ email: 'nosy@example.test', password: 'StrongPassword123', paperSite: 'Babuyan' });
     const url = new URL(signup.body.developmentVerificationUrl);
     await other.post('/api/v1/auth/verify').send({ token: url.searchParams.get('token') ?? '' });
     await other.post('/api/v1/auth/login').send({ email: 'nosy@example.test', password: 'StrongPassword123' });
     expect((await other.get(`/api/v1/predictions/${id}`)).status).toBe(404);
-    expect((await other.get(`/api/v1/predictions/${id}/download?format=json`)).status).toBe(404);
+    expect((await other.get(`/api/v1/predictions/${id}/download?format=json`)).status).toBe(400);
   });
 
   it('writes a grounded deterministic report with citations and no provider', async () => {
@@ -430,7 +453,7 @@ describe('researcher workflow against a contract-double model service', () => {
     expect(report.status).toBe(201);
     expect(report.body.report.provider).toBeNull();
     expect(report.body.report.warnings.join(' ')).toContain('deterministic summary of stored results');
-    expect(report.body.report.body).toContain('57.25');
+    expect(report.body.report.body).toContain('57%');
     expect(report.body.report.body).toContain('Parameters configured from imported data: g');
     expect(report.body.report.body).toContain('T0 was changed');
     expect(report.body.report.citations.some((citation: { predictionId: string | null }) => citation.predictionId === id)).toBe(true);
@@ -443,7 +466,7 @@ describe('researcher workflow against a contract-double model service', () => {
   it('refuses a report for a prediction the caller does not own', async () => {
     const id = (await researcher.get('/api/v1/predictions')).body.predictions[0].predictionId as string;
     const other = request.agent(app);
-    const signup = await other.post('/api/v1/auth/signup').send({ email: 'stranger@example.test', password: 'StrongPassword123' });
+    const signup = await other.post('/api/v1/auth/signup').send({ email: 'stranger@example.test', password: 'StrongPassword123', paperSite: 'Babuyan' });
     const url = new URL(signup.body.developmentVerificationUrl);
     await other.post('/api/v1/auth/verify').send({ token: url.searchParams.get('token') ?? '' });
     await other.post('/api/v1/auth/login').send({ email: 'stranger@example.test', password: 'StrongPassword123' });
@@ -453,10 +476,10 @@ describe('researcher workflow against a contract-double model service', () => {
 
   it('shows the run on the dashboard of its owner only', async () => {
     const dashboard = await researcher.get('/api/v1/dashboard');
-    expect(dashboard.body.predictionCount).toBe(1);
+    expect(dashboard.body.predictionCount).toBe(2);
     expect(dashboard.body.datasetCount).toBeGreaterThanOrEqual(3);
     expect(dashboard.body.latestPrediction).not.toBeNull();
-    expect(dashboard.body.modelStatus.configured).toBe(true);
+    expect(dashboard.body.modelStatus.configured).toBe(false);
     expect(dashboard.body.modelStatus.provisionalParameters).toEqual(expect.arrayContaining(['K', 'beta']));
   });
 
@@ -501,7 +524,7 @@ describe('exploratory scenario runs while alpha and g are unconfigured', () => {
     scenarioApp = createApp({ database: new Database() });
     await modelConfigService.ensureSeeded();
     analyst = request.agent(scenarioApp);
-    const signup = await analyst.post('/api/v1/auth/signup').send({ email: 'analyst@example.test', password: 'StrongPassword123' });
+    const signup = await analyst.post('/api/v1/auth/signup').send({ email: 'analyst@example.test', password: 'StrongPassword123', paperSite: 'Babuyan' });
     const url = new URL(signup.body.developmentVerificationUrl);
     await analyst.post('/api/v1/auth/verify').send({ token: url.searchParams.get('token') ?? '' });
     await analyst.post('/api/v1/auth/login').send({ email: 'analyst@example.test', password: 'StrongPassword123' });
@@ -582,9 +605,10 @@ describe('exploratory scenario runs while alpha and g are unconfigured', () => {
 
     // It exists in history but does not count as a validated prediction.
     const list = await analyst.get('/api/v1/predictions');
-    expect(list.body.predictions).toHaveLength(1);
+    expect(list.body.predictions).toHaveLength(2);
+    expect(list.body.predictions.some((prediction: { status: string }) => prediction.status === 'scenario')).toBe(true);
     const dashboard = await analyst.get('/api/v1/dashboard');
-    expect(dashboard.body.predictionCount).toBe(0);
+    expect(dashboard.body.predictionCount).toBe(2);
     expect(dashboard.body.latestPrediction).not.toBeNull();
 
     const markdown = await analyst.get(`/api/v1/predictions/${record.predictionId}/download?format=markdown`);
@@ -629,7 +653,7 @@ describe('exploratory scenario runs while alpha and g are unconfigured', () => {
         baseVersion: status.body.status.activeModelConfigVersion,
         changes: { alpha: 0.05, g: 0.02 },
         notes: 'Configured so the overwrite guard can be checked.',
-        reviewStatus: 'reviewed',
+        reviewStatus: 'unreviewed',
         effectiveDate: '2006-01-01'
       });
     expect(version.status).toBe(201);
@@ -656,5 +680,34 @@ describe('exploratory scenario runs while alpha and g are unconfigured', () => {
     const markdown = await call()
       .get(`/api/v1/predictions/${record.predictionId}/download?format=markdown`);
     expect(markdown.text).toContain('| alpha | 0.5 | per degC per year | not stated | no, the configured value was used |');
+  });
+
+  it('refuses unreviewed paper data, wrong scope, and out-of-range baseline years', async () => {
+    const call = (): Agent => request.agent(scenarioApp).set('Cookie', analystCookie) as Agent;
+    const citywideId = await importDataset(call(), 'sst', 'Citywide SST series 2006-2016', 'Sea-surface temperature research fixture 2024', sstCsv);
+    const paper = await call().post('/api/v1/predictions').send(requestBody({ sstDatasetId: citywideId }));
+    expect(paper.status).toBe(503);
+    expect(paper.body.error.message).toContain('independent review');
+
+    const scenario = {
+      profile: 'scenario',
+      assumedValues: [{ key: 'alpha', value: 0.2, unit: 'per degC per year', rationale: 'Scope and coverage gate test.', range: null }]
+    };
+    const outside = await call().post('/api/v1/predictions').send(requestBody({
+      ...scenario, baselineYear: 2005, sstDatasetId: citywideId,
+      coralBaseline: { ...(requestBody().coralBaseline as Record<string, unknown>), year: 2005 }
+    }));
+    expect(outside.status).toBe(400);
+    expect(outside.body.error.message).toContain('no observed SST value');
+
+    const reefSite = await call().post('/api/v1/data-imports')
+      .field('kind', 'sst').field('label', 'Reef-site SST').field('provider', 'Research fixture')
+      .field('sourceCitation', 'Sea-surface temperature fixture 2024').field('unit', 'degC')
+      .field('scope', 'reef-site').field('spatialCoverage', 'One reef site in Puerto Princesa')
+      .attach('file', Buffer.from(sstCsv), { filename: 'reef-sst.csv', contentType: 'text/csv' });
+    expect(reefSite.status).toBe(201);
+    const wrongScope = await call().post('/api/v1/predictions').send(requestBody({ ...scenario, sstDatasetId: reefSite.body.dataset.id }));
+    expect(wrongScope.status).toBe(400);
+    expect(wrongScope.body.error.message).toContain('citywide annual average');
   });
 });

@@ -27,9 +27,13 @@ export function PredictionSummaryCard({ prediction, onOpen }: { prediction: Pred
           ? <ConditionBadge label="DEMO" status="danger" />
           : prediction.isScenario
             ? <ConditionBadge label={SCENARIO_LABEL} status="danger" />
+            : prediction.isPaperReproduction
+              ? <ConditionBadge label="PAPER-REPRODUCTION" status="warning" />
+            : prediction.status === 'unavailable'
+              ? <ConditionBadge label="Not completed" status="unavailable" />
             : <ConditionBadge label="Model projection" status="good" />}
       </div>
-      <div className="prediction-number">{prediction.finalCoverPercent.toFixed(2)}%</div>
+      <div className="prediction-number">{prediction.status === 'unavailable' ? '—' : `${prediction.finalCoverPercent.toFixed(2)}%`}</div>
       <p className="muted">{prediction.baselineYear} ({prediction.initialCoverPercent.toFixed(2)}%) to {endYear}</p>
       <div className="card-meta">
         <span>Config {prediction.modelConfigVersion}</span>
@@ -46,7 +50,7 @@ export function PredictionSummaryCard({ prediction, onOpen }: { prediction: Pred
   );
 }
 
-export function ReferenceChart({ points, title = 'Paper-reported live coral cover', description }: { points: PaperCoverPoint[]; title?: string; description?: string }): JSX.Element {
+export function ReferenceChart({ points, title = 'Paper-reported live coral cover', description, showAccessibleTable = true }: { points: PaperCoverPoint[]; title?: string; description?: string; showAccessibleTable?: boolean }): JSX.Element {
   const width = 720;
   const height = 260;
   const padding = 28;
@@ -79,14 +83,14 @@ export function ReferenceChart({ points, title = 'Paper-reported live coral cove
           <text x={12} y={height - padding} className="chart-label">0%</text>
         </svg>
       </div>
-      <details className="table-alternative">
+      {showAccessibleTable && <details className="table-alternative">
         <summary>Accessible table alternative</summary>
         <table>
           <caption>{title} (%)</caption>
           <thead><tr><th scope="col">Year</th><th scope="col">Percent</th><th scope="col">Status</th></tr></thead>
           <tbody>{points.map((point) => <tr key={`${point.year}-${point.status}`}><td>{point.year}</td><td>{point.percent}%</td><td>{point.status}</td></tr>)}</tbody>
         </table>
-      </details>
+      </details>}
     </figure>
   );
 }
@@ -101,12 +105,14 @@ export function AnnualSeriesChart({ prediction }: { prediction: PredictionRecord
     points={points}
     title={`Model projection: ${prediction.initialCoverPercent.toFixed(2)}% in ${prediction.baselineYear}`}
     description={`End-of-year states from the RK4 solver, ${prediction.solver.substepsPerYear} substeps per year.`}
+    showAccessibleTable={false}
   />;
 }
 
-export function AnnualTable({ annual }: { annual: AnnualPredictionPoint[] }): JSX.Element {
+export function AnnualTable({ annual, endpointsOnly = false }: { annual: AnnualPredictionPoint[]; endpointsOnly?: boolean }): JSX.Element {
+  const rows = endpointsOnly && annual.length > 2 ? [annual[0], annual[annual.length - 1]] : annual;
   return (
-    <div className="table-wrap">
+    <div className="table-wrap annual-output-table">
       <table>
         <caption className="sr-only">Annual model output</caption>
         <thead>
@@ -114,26 +120,134 @@ export function AnnualTable({ annual }: { annual: AnnualPredictionPoint[] }): JS
             <th scope="col">Year</th><th scope="col">Cover start %</th><th scope="col">Cover end %</th>
             <th scope="col">Interval mean %</th><th scope="col">Mean SST &deg;C</th><th scope="col">Arrivals</th>
             <th scope="col">Growth pp</th><th scope="col">Thermal pp</th><th scope="col">Tourism pp</th>
+            <th scope="col">Tourism g</th><th scope="col">Growth period</th>
             <th scope="col">Condition</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((point) => (
+            <tr key={point.year}>
+              <th scope="row">{point.year}</th>
+              <td data-label="Cover start %">{point.coverStartPercent.toFixed(3)}</td>
+              <td data-label="Cover end %">{point.coverEndPercent.toFixed(3)}</td>
+              <td data-label="Interval mean %">{point.coverIntervalMeanPercent.toFixed(3)}</td>
+              <td data-label="Mean SST °C">{((point.temperatureStartC + point.temperatureEndC) / 2).toFixed(3)}</td>
+              <td data-label="Arrivals">{Math.round((point.tourismStartArrivals + point.tourismEndArrivals) / 2).toLocaleString()}</td>
+              <td data-label="Growth pp">{point.growthContributionPp.toFixed(3)}</td>
+              <td data-label="Thermal pp">{point.thermalContributionPp.toFixed(3)}</td>
+              <td data-label="Tourism pp">{point.tourismContributionPp.toFixed(3)}</td>
+              <td data-label="Tourism g">{(point.tourismGrowthRate ?? 0).toFixed(6)}</td>
+              <td data-label="Growth period">{point.tourismPeriodStartYear && point.tourismPeriodEndYear ? `${point.tourismPeriodStartYear}-${point.tourismPeriodEndYear}` : 'continuous model'}</td>
+              <td data-label="Condition">{point.meanClassification ?? 'unclassified'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** A reproducibility-oriented view of every stored annual solver output. */
+export function ComputationBreakdownTable({ annual }: { annual: AnnualPredictionPoint[] }): JSX.Element {
+  return (
+    <div className="table-wrap computation-breakdown-table">
+      <table>
+        <caption className="sr-only">Mathematical computation breakdown by forecast year</caption>
+        <thead>
+          <tr>
+            <th scope="col">Year</th><th scope="col">t</th><th scope="col">C start</th><th scope="col">C end</th><th scope="col">C mean</th>
+            <th scope="col">T start</th><th scope="col">T end</th><th scope="col">V start</th><th scope="col">V end</th><th scope="col">g</th>
+            <th scope="col">Growth rate</th><th scope="col">Thermal rate</th><th scope="col">Tourism rate</th>
+            <th scope="col">Growth pp</th><th scope="col">Thermal pp</th><th scope="col">Tourism pp</th>
           </tr>
         </thead>
         <tbody>
           {annual.map((point) => (
             <tr key={point.year}>
               <th scope="row">{point.year}</th>
-              <td>{point.coverStartPercent.toFixed(3)}</td>
-              <td>{point.coverEndPercent.toFixed(3)}</td>
-              <td>{point.coverIntervalMeanPercent.toFixed(3)}</td>
-              <td>{((point.temperatureStartC + point.temperatureEndC) / 2).toFixed(3)}</td>
-              <td>{Math.round((point.tourismStartArrivals + point.tourismEndArrivals) / 2).toLocaleString()}</td>
-              <td>{point.growthContributionPp.toFixed(3)}</td>
-              <td>{point.thermalContributionPp.toFixed(3)}</td>
-              <td>{point.tourismContributionPp.toFixed(3)}</td>
-              <td>{point.meanClassification ?? 'unclassified'}</td>
+              <td data-label="t">{point.tYears.toFixed(3)}</td>
+              <td data-label="C start">{point.coverStartPercent.toFixed(3)}</td>
+              <td data-label="C end">{point.coverEndPercent.toFixed(3)}</td>
+              <td data-label="C mean">{point.coverIntervalMeanPercent.toFixed(3)}</td>
+              <td data-label="T start">{point.temperatureStartC.toFixed(3)}</td>
+              <td data-label="T end">{point.temperatureEndC.toFixed(3)}</td>
+              <td data-label="V start">{Math.round(point.tourismStartArrivals).toLocaleString()}</td>
+              <td data-label="V end">{Math.round(point.tourismEndArrivals).toLocaleString()}</td>
+              <td data-label="g">{(point.tourismGrowthRate ?? 0).toFixed(6)}</td>
+              <td data-label="Growth rate">{point.growthRateMean.toFixed(6)}</td>
+              <td data-label="Thermal rate">{point.thermalRateMean.toFixed(6)}</td>
+              <td data-label="Tourism rate">{point.tourismRateMean.toFixed(6)}</td>
+              <td data-label="Growth pp">{point.growthContributionPp.toFixed(3)}</td>
+              <td data-label="Thermal pp">{point.thermalContributionPp.toFixed(3)}</td>
+              <td data-label="Tourism pp">{point.tourismContributionPp.toFixed(3)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+const parameterValue = (parameters: ModelParameter[], key: string): number | null =>
+  parameters.find((parameter) => parameter.key === key)?.value ?? null;
+
+const computationNumber = (value: number | null, digits = 6): string =>
+  value === null || !Number.isFinite(value) ? 'not configured' : value.toFixed(digits);
+
+/** Shows the actual equation substitution alongside the stored solver output. */
+export function MathematicalBreakdown({ prediction }: { prediction: PredictionRecord }): JSX.Element {
+  const r = parameterValue(prediction.parameters, 'r');
+  const alpha = parameterValue(prediction.parameters, 'alpha');
+  const beta = parameterValue(prediction.parameters, 'beta');
+  const k = parameterValue(prediction.parameters, 'K');
+  const t0 = parameterValue(prediction.parameters, 'T0');
+  const gamma = parameterValue(prediction.parameters, 'gamma');
+  const tcrit = parameterValue(prediction.parameters, 'Tcrit');
+  return (
+    <div className="math-breakdown">
+      <div className="equation-card">
+        <strong>Equation evaluated by the RK4 solver</strong>
+        <code>dC/dt = r·C·(1 − C/K) − α·max(0, T(t) − Tcrit)·C − β·V(t)·C</code>
+        <code>T(t) = T0 + γ·t</code>
+        <code>V(t) = continuous piecewise tourism projection from V0 at {prediction.baselineYear}</code>
+        <span className="muted">t = 0 at {prediction.baselineYear}; each stored contribution is the solver’s interval-mean percentage-point contribution.</span>
+      </div>
+      <div className="equation-card">
+        <strong>Resolved parameter values</strong>
+        <div className="equation-values">
+          <span>r = {computationNumber(r)} / year</span>
+          <span>K = {computationNumber(k, 3)} percentage points</span>
+          <span>α = {computationNumber(alpha)} per °C per year</span>
+          <span>β = {computationNumber(beta)}</span>
+          <span>T0 = {computationNumber(t0, 3)} °C</span>
+          <span>γ = {computationNumber(gamma, 3)} °C / year</span>
+          <span>Tcrit = {computationNumber(tcrit, 3)} °C</span>
+        </div>
+      </div>
+      <div className="calculation-list">
+        {prediction.annual.map((point) => {
+          const cover = point.coverStartPercent;
+          const temperature = point.temperatureStartC;
+          const arrivals = point.tourismStartArrivals;
+          const growth = r !== null && k !== null ? r * cover * (1 - cover / k) : null;
+          const thermal = alpha !== null && tcrit !== null ? alpha * Math.max(0, temperature - tcrit) * cover : null;
+          const tourism = beta !== null ? beta * arrivals * cover : null;
+          const derivative = growth !== null && thermal !== null && tourism !== null ? growth - thermal - tourism : null;
+          return (
+            <details className="calculation-item" key={point.year}>
+              <summary><strong>{point.year}</strong><span className="muted">t={point.tYears.toFixed(2)} · C end={point.coverEndPercent.toFixed(3)}%</span></summary>
+              <div className="calculation-detail">
+                <code>t = {point.tYears.toFixed(3)}; C = {cover.toFixed(3)}; T = {temperature.toFixed(3)}; V = {Math.round(arrivals).toLocaleString()}</code>
+                <code>growth = {computationNumber(r)} × {cover.toFixed(3)} × (1 − {cover.toFixed(3)} / {computationNumber(k, 3)}) = {computationNumber(growth)}</code>
+                <code>thermal = {computationNumber(alpha)} × max(0, {temperature.toFixed(3)} − {computationNumber(tcrit, 3)}) × {cover.toFixed(3)} = {computationNumber(thermal)}</code>
+                <code>tourism = {computationNumber(beta)} × {Math.round(arrivals).toLocaleString()} × {cover.toFixed(3)} = {computationNumber(tourism)}</code>
+                <code>dC/dt = {computationNumber(growth)} − {computationNumber(thermal)} − {computationNumber(tourism)} = {computationNumber(derivative)} percentage points/year</code>
+                <span className="muted">Stored interval means: growth {point.growthContributionPp.toFixed(3)} pp, thermal {point.thermalContributionPp.toFixed(3)} pp, tourism {point.tourismContributionPp.toFixed(3)} pp.</span>
+              </div>
+            </details>
+          );
+        })}
+      </div>
     </div>
   );
 }

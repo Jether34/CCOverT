@@ -142,6 +142,7 @@ class ModelParameters:
     g: float
     k: float
     baseline_year: int = 2006
+    tourism_growth_periods: tuple[dict[str, Any], ...] = ()
 
     # -- construction -----------------------------------------------------
     @classmethod
@@ -179,7 +180,32 @@ class ModelParameters:
 
         cls._check_ranges(numbers)
         fields = {spec.symbol.lower(): numbers[spec.symbol] for spec in REQUIRED_PARAMETER_SPECS}
-        return cls(baseline_year=baseline_year, **fields)
+        raw_periods = value.get("tourismGrowthPeriods", value.get("tourism_growth_periods", ()))
+        periods = tuple(dict(period) for period in raw_periods) if raw_periods else ()
+        cls._check_tourism_periods(periods, baseline_year)
+        return cls(baseline_year=baseline_year, tourism_growth_periods=periods, **fields)
+
+    @staticmethod
+    def _check_tourism_periods(periods: tuple[dict[str, Any], ...], baseline_year: int) -> None:
+        if not periods:
+            return
+        previous_end: int | None = None
+        for index, period in enumerate(periods):
+            try:
+                start = int(period.get("startYear", period.get("start_year")))
+                end = int(period.get("endYear", period.get("end_year")))
+                growth = float(period.get("growthRate", period.get("growth_rate")))
+            except (TypeError, ValueError):
+                raise ModelValidationError("tourismGrowthPeriods", "each period needs numeric startYear, endYear and growthRate")
+            if start > end:
+                raise ModelValidationError("tourismGrowthPeriods", "period startYear must not exceed endYear")
+            if not math.isfinite(growth) or not -0.5 <= growth <= 0.5:
+                raise ModelValidationError("tourismGrowthPeriods.growthRate", "must be finite and between -0.5 and 0.5 per year")
+            if index == 0 and start > baseline_year:
+                raise ModelValidationError("tourismGrowthPeriods", "the first period must cover the configured baseline year")
+            if previous_end is not None and start != previous_end + 1:
+                raise ModelValidationError("tourismGrowthPeriods", "periods must be ordered, non-overlapping, and gap-free")
+            previous_end = end
 
     @staticmethod
     def _check_ranges(values: Mapping[str, float]) -> None:
@@ -199,8 +225,8 @@ class ModelParameters:
             raise ModelValidationError("V0", "must be zero or positive tourist arrivals per year")
         if not -0.5 <= values["g"] <= 0.5:
             raise ModelValidationError("g", "must be between -0.5 and 0.5 per year")
-        if not 0.0 < values["K"] <= 1000.0:
-            raise ModelValidationError("K", "must be greater than 0 and no more than 1000 cover percentage points")
+        if not 0.0 < values["K"] <= MAX_COVER_PERCENT:
+            raise ModelValidationError("K", "must be greater than 0 and no more than 100 cover percentage points")
 
     # -- derived drivers --------------------------------------------------
     def temperature(self, t: float) -> float:
@@ -209,9 +235,40 @@ class ModelParameters:
         return self.t0 + self.gamma * t
 
     def tourism(self, t: float) -> float:
-        """V(t) = V0*exp(g*t), in annual tourist arrivals."""
+        """V(t) = V0*exp(g*t), optionally integrated across growth periods."""
 
-        return self.v0 * math.exp(self.g * t)
+        if not self.tourism_growth_periods:
+            return self.v0 * math.exp(self.g * t)
+        if t < 0:
+            raise ModelValidationError("t", "cannot be negative from the configured baseline")
+        target_year = self.baseline_year + t
+        value = self.v0
+        cursor = self.baseline_year
+        for period in self.tourism_growth_periods:
+            start = int(period.get("startYear", period.get("start_year")))
+            end = int(period.get("endYear", period.get("end_year"))) + 1
+            growth = float(period.get("growthRate", period.get("growth_rate")))
+            segment_start = max(cursor, start)
+            segment_end = min(target_year, end)
+            if segment_end > segment_start:
+                value *= math.exp(growth * (segment_end - segment_start))
+                cursor = segment_end
+            if cursor >= target_year:
+                break
+        if cursor < target_year:
+            raise ModelValidationError("tourismGrowthPeriods", "periods do not cover the requested horizon")
+        return value
+
+    def tourism_growth_rate(self, t: float) -> float:
+        if not self.tourism_growth_periods:
+            return self.g
+        year = self.baseline_year + int(math.floor(t))
+        for period in self.tourism_growth_periods:
+            start = int(period.get("startYear", period.get("start_year")))
+            end = int(period.get("endYear", period.get("end_year")))
+            if start <= year <= end:
+                return float(period.get("growthRate", period.get("growth_rate")))
+        raise ModelValidationError("tourismGrowthPeriods", f"no tourism growth period covers year {year}")
 
     def components(self, cover: float, t: float) -> tuple[float, float, float]:
         """Return (growth, thermal, tourism) rates for a state and time."""
@@ -237,6 +294,7 @@ class ModelParameters:
             "g": self.g,
             "K": self.k,
             "baselineYear": self.baseline_year,
+            "tourismGrowthPeriods": [dict(period) for period in self.tourism_growth_periods],
         }
 
 
@@ -253,6 +311,9 @@ class AnnualState:
     temperature_end_c: float
     tourism_start_arrivals: float
     tourism_end_arrivals: float
+    tourism_growth_rate: float
+    tourism_period_start_year: int | None
+    tourism_period_end_year: int | None
     growth_rate_mean: float
     thermal_rate_mean: float
     tourism_rate_mean: float
@@ -273,6 +334,9 @@ class AnnualState:
             "temperatureEndC": round(self.temperature_end_c, 6),
             "tourismStartArrivals": round(self.tourism_start_arrivals, 4),
             "tourismEndArrivals": round(self.tourism_end_arrivals, 4),
+            "tourismGrowthRate": round(self.tourism_growth_rate, 6),
+            "tourismPeriodStartYear": self.tourism_period_start_year,
+            "tourismPeriodEndYear": self.tourism_period_end_year,
             "growthRateMean": round(self.growth_rate_mean, 6),
             "thermalRateMean": round(self.thermal_rate_mean, 6),
             "tourismRateMean": round(self.tourism_rate_mean, 6),
@@ -462,6 +526,15 @@ def simulate(
         growth_mean = _trapezoid_mean(growth_nodes, h)
         thermal_mean = _trapezoid_mean(thermal_nodes, h)
         tourism_mean = _trapezoid_mean(tourism_nodes, h)
+        period_start_year = period_end_year = None
+        if parameters.tourism_growth_periods:
+            period_year = parameters.baseline_year + year_index + 1
+            for period in parameters.tourism_growth_periods:
+                start = int(period.get("startYear", period.get("start_year")))
+                end = int(period.get("endYear", period.get("end_year")))
+                if start <= period_year <= end:
+                    period_start_year, period_end_year = start, end
+                    break
         annual.append(
             AnnualState(
                 year=parameters.baseline_year + year_index + 1,
@@ -473,6 +546,9 @@ def simulate(
                 temperature_end_c=parameters.temperature(t_end),
                 tourism_start_arrivals=parameters.tourism(t_start),
                 tourism_end_arrivals=parameters.tourism(t_end),
+                tourism_growth_rate=parameters.tourism_growth_rate(t_start),
+                tourism_period_start_year=period_start_year,
+                tourism_period_end_year=period_end_year,
                 growth_rate_mean=growth_mean,
                 thermal_rate_mean=thermal_mean,
                 tourism_rate_mean=tourism_mean,
@@ -536,7 +612,7 @@ CALIBRATION_BRACKETS: dict[str, tuple[float, float]] = {
     "beta": (0.0, 1e-3),
     "g": (0.0, 0.5),
     "r": (0.0, 5.0),
-    "K": (1.0, 1000.0),
+    "K": (1.0, MAX_COVER_PERCENT),
     "gamma": (-0.5, 0.5),
     "t0": (-5.0, 45.0),
     "tcrit": (-5.0, 45.0),
@@ -731,6 +807,10 @@ def metadata() -> dict[str, Any]:
         PAPER_PARAMETER_SPECS,
         SOLVER_DEFAULTS,
         STUDY_AREA,
+        PAPER_REPRODUCTION_CONFIG_VERSION,
+        PAPER_REPRODUCTION_LABEL,
+        PAPER_REPRODUCTION_TOURISM_PERIODS,
+        TOURISM_CONFIG_VERSION,
     )
 
     return {
@@ -745,5 +825,14 @@ def metadata() -> dict[str, Any]:
         "studyArea": STUDY_AREA,
         "paperConflicts": [dict(item) for item in PAPER_CONFLICTS],
         "demoProfile": dict(DEMO_PROFILE),
+        "paperReproductionProfile": {
+            "version": PAPER_REPRODUCTION_CONFIG_VERSION,
+            "label": PAPER_REPRODUCTION_LABEL,
+            "alpha": 0.05,
+            "initialCoverPercent": 57.0,
+            "initialCoverYear": 2006,
+            "tourismConfigVersion": TOURISM_CONFIG_VERSION,
+            "tourismGrowthPeriods": [dict(period) for period in PAPER_REPRODUCTION_TOURISM_PERIODS],
+        },
         "targetMeasure": "%LCC (HC+SC) in percentage points on a 0-100 scale",
     }

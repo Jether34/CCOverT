@@ -7,7 +7,7 @@ declare global {
         id: string;
         email: string;
         emailVerified: boolean;
-        role: 'user' | 'researcher' | 'admin';
+        role: 'client' | 'user' | 'researcher' | 'admin';
         preferences: {
           theme: 'light' | 'dark';
           language: 'en' | 'fil';

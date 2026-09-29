@@ -48,6 +48,7 @@ export interface ApiErrorBody {
     details?: unknown;
     requestId?: string;
   };
+  prediction?: PredictionRecord;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -105,11 +106,14 @@ export const PAPER_ORGANIZATION = [
 /* accounts                                                                    */
 /* -------------------------------------------------------------------------- */
 
-export type UserRole = 'user' | 'researcher' | 'admin';
+/** `user` is retained only as a legacy migration value; new accounts are clients. */
+export type UserRole = 'client' | 'user' | 'researcher' | 'admin';
 
 export interface UserPreferences {
   theme: 'light' | 'dark';
   language: 'en' | 'fil';
+  /** Paper-site preference for context only; the equation remains citywide. */
+  paperSite?: typeof PAPER_SITES[number] | null;
 }
 
 export interface User {
@@ -145,6 +149,9 @@ export interface CurrentUserResponse {
 
 export type ParameterStatus =
   | 'reported'
+  | 'paper-stated'
+  | 'paper-inferred'
+  | 'dataset-estimated'
   | 'provisional'
   | 'unspecified-in-paper'
   | 'synthetic-demo-only'
@@ -177,6 +184,12 @@ export interface ModelConfig {
   profile: 'paper' | 'demo';
   studyAreaId: string;
   baselineYear: number;
+  horizonYears: number;
+  predictionStartYear: number;
+  forecastEndYear: number;
+  initialCoverPercent: number;
+  initialCoverYear: number;
+  initialCoverSource: string;
   sstDatasetId?: string | null;
   tourismDatasetId?: string | null;
   archivedAt?: string | null;
@@ -185,10 +198,27 @@ export interface ModelConfig {
   solver: SolverSettings;
   reviewStatus: ReviewStatus;
   reviewedBy: string | null;
+  /**
+   * Set only on a version published by the independent-review endpoint, naming
+   * the version it reviewed. It is what makes a duplicate review detectable,
+   * because the reviewed version itself stays immutable and unreviewed.
+   */
+  reviewedVersion?: string | null;
   createdBy: string;
   createdAt: string;
   effectiveDate: string | null;
   notes: string;
+  tourismGrowthPeriods?: TourismGrowthPeriod[];
+}
+
+export interface TourismGrowthPeriod {
+  startYear: number;
+  endYear: number;
+  growthRate: number;
+  unit: string;
+  provenance: string;
+  reviewStatus: ReviewStatus;
+  effectiveDate: string | null;
 }
 
 export interface ConditionBand {
@@ -223,7 +253,10 @@ export interface ModelStatus {
   activeModelConfigVersion: string | null;
   missingParameters: MissingParameter[];
   provisionalParameters: string[];
-  activeProfile: 'paper' | 'demo' | 'scenario' | null;
+  unreviewedParameters: string[];
+  disputedParameters: string[];
+  dataGaps: string[];
+  activeProfile: 'paper' | 'demo' | 'scenario' | 'paper-reproduction' | null;
   demoProfileAvailable: boolean;
   /** Scenario runs are always available; no environment switch gates them. */
   scenarioProfileAvailable: true;
@@ -276,8 +309,24 @@ export interface EnvironmentalDataset {
   status: DatasetValidationStatus;
   ownerId: string | null;
   createdAt: string;
+  /** SHA-256 of the imported CSV/workbook content. */
+  checksumSha256?: string;
   /** Only set by the researcher's g estimation. */
   derivedValue?: DerivedValue | null;
+  /**
+   * Set only by the admin dataset-review endpoint. An import is never
+   * `validated` without one, so parsing success can never be mistaken for
+   * independent scientific review.
+   */
+  review?: DatasetReviewRecord | null;
+}
+
+export interface DatasetReviewRecord {
+  status: DatasetValidationStatus;
+  reviewedById: string;
+  reviewedByLabel: string;
+  notes: string;
+  reviewedAt: string;
 }
 
 /**
@@ -318,6 +367,9 @@ export interface AnnualPredictionPoint {
   temperatureEndC: number;
   tourismStartArrivals: number;
   tourismEndArrivals: number;
+  tourismGrowthRate: number;
+  tourismPeriodStartYear: number | null;
+  tourismPeriodEndYear: number | null;
   growthRateMean: number;
   thermalRateMean: number;
   tourismRateMean: number;
@@ -331,12 +383,14 @@ export interface AnnualPredictionPoint {
 export interface SourceRecord {
   name: string;
   source: string;
+  provider?: string | null;
   unit: string;
   timeWindow: string;
   coverage: string | null;
   scope: string | null;
   datasetId: string | null;
   retrievedAt: string | null;
+  checksumSha256?: string | null;
 }
 
 export interface ConsentedLocation {
@@ -355,6 +409,7 @@ export interface CoralBaselineInput {
   softCoralPercent: number | null;
   measure: string;
   surveySource: string;
+  surveyMethod?: string | null;
   surveyScope: StudyAreaScope;
   sameScopeConfirmed: boolean;
 }
@@ -375,9 +430,12 @@ export interface ScenarioAssumption {
 export interface PredictionRequest {
   studyAreaId: string;
   scope: StudyAreaScope;
-  profile: 'paper' | 'demo' | 'scenario';
+  profile: 'paper' | 'demo' | 'scenario' | 'paper-reproduction';
   baselineYear: number;
   horizonYears: number;
+  predictionStartYear?: number;
+  /** Final requested forecast year. The model origin remains baselineYear. */
+  forecastEndYear?: number;
   coralBaseline: CoralBaselineInput;
   sstDatasetId: string | null;
   tourismDatasetId: string | null;
@@ -385,12 +443,14 @@ export interface PredictionRequest {
   solver: Pick<SolverSettings, 'substepsPerYear'>;
   /** Required for the scenario profile, and rejected for paper and demo. */
   assumedValues: ScenarioAssumption[];
+  tourismGrowthPeriods?: TourismGrowthPeriod[];
 }
 
 export interface PredictionResponse {
   predictionId: string;
   requestId: string;
   status: PredictionStatus;
+  validationStatus?: 'not-validated' | 'independently-validated';
   isDemo: boolean;
   /**
    * True for an exploratory run built on analyst-supplied assumptions. Scenario
@@ -398,6 +458,10 @@ export interface PredictionResponse {
    * counts and reports.
    */
   isScenario: boolean;
+  isPaperReproduction?: boolean;
+  alphaResolution?: 'explicit' | 'inactive-for-horizon';
+  profile: 'paper' | 'demo' | 'scenario' | 'paper-reproduction';
+  tourismGrowthPeriods?: TourismGrowthPeriod[];
   /**
    * The assumptions supplied for this run. An assumption for a parameter that
    * was already configured is kept for the audit trail but is not applied, and
@@ -407,11 +471,14 @@ export interface PredictionResponse {
   equationVersion: string;
   modelVersion: string;
   modelConfigVersion: string;
+  modelConfigBaselineYear?: number;
   targetMeasure: string;
   studyArea: StudyArea;
   scope: StudyAreaScope;
   baselineYear: number;
   horizonYears: number;
+  predictionStartYear?: number;
+  forecastEndYear?: number;
   initialCoverPercent: number;
   finalCoverPercent: number;
   finalIntervalMeanPercent: number;
@@ -423,21 +490,34 @@ export interface PredictionResponse {
   solver: SolverSettings;
   sources: SourceRecord[];
   warnings: string[];
+  failureReason?: string | null;
   createdAt: string;
 }
 
-export type PredictionStatus = 'computed' | 'demo' | 'scenario' | 'unavailable';
+export type PredictionStatus = 'computed' | 'demo' | 'scenario' | 'paper-reproduction' | 'unavailable';
 
 /** Only `computed` runs without assumptions count as validated predictions. */
 export const isValidatedPrediction = (prediction: {
   status: PredictionStatus;
   isDemo: boolean;
   isScenario?: boolean;
-}): boolean => prediction.status === 'computed' && !prediction.isDemo && !prediction.isScenario;
+  isPaperReproduction?: boolean;
+  validationStatus?: 'independently-validated' | 'not-validated';
+}): boolean => prediction.status === 'computed' && !prediction.isDemo && !prediction.isScenario && !prediction.isPaperReproduction && prediction.validationStatus === 'independently-validated';
 
 export const SCENARIO_LABEL = 'Assumption—not a validated finding';
 export const SCENARIO_DISCLAIMER =
   `${SCENARIO_LABEL}. Exploratory scenario, not a validated prediction: this run substitutes analyst-assumed values for parameters the paper leaves unspecified. It must not be cited as a finding or compared against a validated run.`;
+
+export const PAPER_REPRODUCTION_LABEL =
+  'Paper-reproduction prediction using stated, estimated, inferred, and provisional parameters. Independent scientific validation is pending.';
+
+export const PAPER_REPRODUCTION_TOURISM_PERIODS: TourismGrowthPeriod[] = [
+  { startYear: 2006, endYear: 2016, growthRate: 0.213314, unit: 'per year', provenance: 'Confirmed paper-reproduction tourism configuration for Puerto Princesa City annual arrivals.', reviewStatus: 'unreviewed', effectiveDate: '2026-09-27' },
+  { startYear: 2017, endYear: 2022, growthRate: 0, unit: 'per year', provenance: 'Confirmed paper-reproduction tourism configuration; no growth period.', reviewStatus: 'unreviewed', effectiveDate: '2026-09-27' },
+  { startYear: 2023, endYear: 2026, growthRate: 0.128708, unit: 'per year', provenance: 'Confirmed paper-reproduction tourism configuration for Puerto Princesa City annual arrivals.', reviewStatus: 'unreviewed', effectiveDate: '2026-09-27' },
+  { startYear: 2027, endYear: 9999, growthRate: 0.128708, unit: 'per year', provenance: 'Confirmed continuation of the 2023-2026 tourism growth rate after 2026.', reviewStatus: 'unreviewed', effectiveDate: '2026-09-27' }
+];
 
 export interface PredictionRecord extends PredictionResponse {
   userId?: string;
@@ -591,6 +671,77 @@ export const PAPER_REPORTED_ACCURACY = {
 } as const;
 
 export const PAPER_REPORTED_MAE = 0.3;
+
+/* -------------------------------------------------------------------------- */
+/* baseline selection                                                          */
+/* -------------------------------------------------------------------------- */
+
+export interface PaperBaselineOption {
+  id: string;
+  /** Radio-button text. Names the table the figure comes from. */
+  label: string;
+  year: number;
+  coverPercent: number;
+  /**
+   * Citation the API accepts as `surveySource`. It always embeds `year`,
+   * because the API rejects a baseline citation without one.
+   */
+  source: string;
+  method: string;
+  note: string;
+  /** True when this figure disagrees with the rest of the paper. */
+  conflict: boolean;
+}
+
+const TABLE45 = PAPER_REPORTED_ACCURACY.table4[0].observedPercent;
+const TABLE45_YEAR = PAPER_REPORTED_ACCURACY.table4[0].year;
+const TABLE55 = PAPER_REPORTED_ACCURACY.table5[0].observedPercent;
+const TABLE55_YEAR = PAPER_REPORTED_ACCURACY.table5[0].year;
+const REPORTED_AVERAGE = PAPER_REPORTED_AVERAGE_COVER[0].percent;
+const REPORTED_AVERAGE_YEAR = PAPER_REPORTED_AVERAGE_COVER[0].year;
+
+/**
+ * The 2006 baseline figures the paper actually prints, offered as an explicit
+ * choice rather than a default. The paper disagrees with itself here, so no
+ * single figure is presented as the correct one and every option carries the
+ * table it came from. Numbers are read from the paper constants above so this
+ * list cannot drift away from the values the reports display.
+ */
+export const PAPER_BASELINE_OPTIONS: readonly PaperBaselineOption[] = [
+  {
+    id: 'table5-observed',
+    label: 'Table 1 / Table 5 observed cover',
+    year: TABLE55_YEAR,
+    coverPercent: TABLE55,
+    source: `CCOverT paper Tables 1 and 5, ${TABLE55_YEAR}`,
+    method: 'Paper-reported %LCC (HC+SC); the underlying survey method is not documented in the paper.',
+    note: 'The value the paper uses in its own results tables.',
+    conflict: false
+  },
+  {
+    id: 'reported-average',
+    label: 'Reported annual average cover',
+    year: REPORTED_AVERAGE_YEAR,
+    coverPercent: REPORTED_AVERAGE,
+    source: `CCOverT paper reported average cover, ${REPORTED_AVERAGE_YEAR}`,
+    method: 'Paper-reported %LCC (HC+SC); the underlying survey method is not documented in the paper.',
+    note: 'Rounded form of the same baseline used elsewhere in the paper.',
+    conflict: false
+  },
+  {
+    id: 'table4-observed',
+    label: 'Table 4 observed cover',
+    year: TABLE45_YEAR,
+    coverPercent: TABLE45,
+    source: `CCOverT paper Table 4, ${TABLE45_YEAR}`,
+    method: 'Paper-reported %LCC (HC+SC); the underlying survey method is not documented in the paper.',
+    note: `Disagrees with the other tables by ${(TABLE55 - TABLE45).toFixed(2)} percentage points. This is the same disagreement behind the unreconciled MAE of ${PAPER_REPORTED_MAE}.`,
+    conflict: true
+  }
+] as const;
+
+/** A baseline citation the API will accept without the user retyping the year. */
+export const paperBaselineSource = (option: PaperBaselineOption): string => option.source;
 
 export const PAPER_ACCURACY_DISCLAIMER =
   'The paper reports a mean absolute error of 0.30. That figure does not reconcile with the values shown in the ' +

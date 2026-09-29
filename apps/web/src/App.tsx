@@ -13,10 +13,10 @@ import { PredictPage } from './pages/PredictPage';
 import { AiPage } from './pages/AiPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HistoryPage } from './pages/HistoryPage';
-import { DataSourcesPage } from './pages/DataSourcesPage';
 import { ModelPage } from './pages/ModelPage';
 import { ResearcherPage } from './pages/ResearcherPage';
 import { DeveloperPage } from './pages/DeveloperPage';
+import { GuidePage } from './pages/GuidePage';
 
 function ThemeEffect(): null {
   const { user } = useAuth();
@@ -55,12 +55,12 @@ export function App(): JSX.Element {
           <Route path="/home" element={<ProtectedPage><RoleHomePage /></ProtectedPage>} />
           <Route path="/predict" element={<ProtectedPage verified><PredictPage /></ProtectedPage>} />
           <Route path="/history" element={<ProtectedPage verified><HistoryPage /></ProtectedPage>} />
-          <Route path="/data" element={<ProtectedRoute roles={['researcher']} verified><DataSourcesPage /></ProtectedRoute>} />
           <Route path="/model" element={<ProtectedRoute roles={['researcher']} verified><ModelPage /></ProtectedRoute>} />
           <Route path="/researcher" element={<ProtectedRoute roles={['researcher']} verified><ResearcherPage /></ProtectedRoute>} />
           <Route path="/developer" element={<ProtectedRoute roles={['admin']}><DeveloperPage /></ProtectedRoute>} />
           <Route path="/ai" element={<ProtectedPage verified><AiPage /></ProtectedPage>} />
           <Route path="/settings" element={<ProtectedPage><SettingsPage /></ProtectedPage>} />
+          <Route path="/guide" element={<ProtectedPage><GuidePage /></ProtectedPage>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

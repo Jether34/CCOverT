@@ -2,8 +2,11 @@ import crypto from 'node:crypto';
 import {
   CONDITION_CONVENTION,
   DEMO_SYNTHETIC_PARAMETERS,
+  PAPER_REPRODUCTION_LABEL,
+  PAPER_REPRODUCTION_TOURISM_PERIODS,
   MODEL_PARAMETERS_NOT_CONFIGURED,
   PAPER_CONFLICTS,
+  PAPER_PARAMETERS,
   SCENARIO_DISCLAIMER,
   SOLVER_DEFAULTS,
   STUDY_AREA,
@@ -17,14 +20,16 @@ import {
   type SourceRecord
 } from '@ccovert/shared';
 import { logger } from '../logger';
+import { config } from '../config';
 import { badRequest, conflict, notConfigured, notFound } from '../utils/errors';
 import { db, type EnvironmentalDatasetRecord, type PredictionRecordStored } from '../repositories/database';
 import { modelClient, type ModelPredictInput } from './modelClient';
 import { datasetService } from './datasets';
-import { modelConfigService, parameterByKey } from './modelConfigService';
+import { modelConfigService, parameterByKey, validateParameterValue } from './modelConfigService';
 import { toPublicRecord } from './report';
 
 const PAPER_CITATION = 'Pacliban, Kanaya and Fujita (2020), CCOverT, Stochastics and Environmental Research Reports';
+export const FUTURE_TOURISM_PROJECTION_WARNING = 'Tourism values after 2026 are model projections using g = 0.128708; no observed tourism data was used for those years.';
 
 /** Least-squares slope/intercept of value against year, anchored at the baseline year. */
 const linearFit = (records: { year: number; value: number }[], baselineYear: number): { intercept: number; slope: number; n: number } => {
@@ -41,15 +46,36 @@ const linearFit = (records: { year: number; value: number }[], baselineYear: num
 
 const valueAtYear = (records: { year: number; value: number }[], year: number): number | null => {
   const exact = records.find((record) => record.year === year);
-  if (exact) return exact.value;
-  const before = [...records].reverse().find((record) => record.year < year);
-  const after = records.find((record) => record.year > year);
-  if (before && after) {
-    const weight = (year - before.year) / (after.year - before.year);
-    return before.value + weight * (after.value - before.value);
-  }
-  return (before ?? after)?.value ?? null;
+  // No interpolation or extrapolation is silently applied to a baseline.
+  return exact?.value ?? null;
 };
+
+export const estimateTourismGrowth = (records: { year: number; value: number }[], baselineYear: number): number => {
+  const usable = records.filter((record) => record.value > 0);
+  if (usable.length < 2) throw badRequest('Paper-reproduction requires at least two positive annual tourism observations to estimate g');
+  const meanT = usable.reduce((sum, record) => sum + (record.year - baselineYear), 0) / usable.length;
+  const meanLog = usable.reduce((sum, record) => sum + Math.log(record.value), 0) / usable.length;
+  const denominator = usable.reduce((sum, record) => sum + ((record.year - baselineYear) - meanT) ** 2, 0);
+  if (denominator === 0) throw badRequest('Paper-reproduction tourism data must contain more than one year');
+  return usable.reduce((sum, record) => sum + ((record.year - baselineYear) - meanT) * (Math.log(record.value) - meanLog), 0) / denominator;
+};
+
+const paperReproductionParameters = (baselineYear = 2006): ModelParameter[] => PAPER_PARAMETERS.map((parameter) => ({
+  ...parameter,
+  value: parameter.key === 'alpha' ? 0.05
+    : parameter.value === null ? null
+      : parameter.key === 'T0' ? parameter.value + 0.013 * (baselineYear - 2006)
+      : parameter.key === 'V0' ? PAPER_REPRODUCTION_TOURISM_PERIODS.reduce((value, period) => {
+        const start = Math.max(2006, period.startYear);
+        const end = Math.min(baselineYear, period.endYear + 1);
+        return end > start ? value * Math.exp(period.growthRate * (end - start)) : value;
+      }, parameter.value)
+        : parameter.value,
+  status: parameter.key === 'alpha' ? 'paper-inferred' as const : parameter.key === 'beta' || parameter.key === 'K' ? 'provisional' as const : 'paper-stated' as const,
+  reviewStatus: 'unreviewed' as const,
+  provenance: parameter.key === 'alpha' ? 'Confirmed paper-reproduction configuration: alpha = 0.05 per degree Celsius per year.' : parameter.provenance,
+  notes: parameter.key === 'alpha' ? 'Paper-reproduction value; not independently validated.' : parameter.notes
+}));
 
 /** Key-sorted JSON so two equal requests always hash identically. */
 const canonical = (value: unknown): unknown => {
@@ -74,6 +100,13 @@ export interface CreatePredictionInput {
   idempotencyKey: string | null;
 }
 
+export interface RecordPredictionFailureInput {
+  userId: string;
+  request: PredictionRequest;
+  idempotencyKey: string | null;
+  reason: string;
+}
+
 export class PredictionService {
   private async resolveDatasets(request: PredictionRequest): Promise<{
     sst: EnvironmentalDatasetRecord | null;
@@ -89,9 +122,10 @@ export class PredictionService {
     if (sst) {
       if (sst.kind !== 'sst') throw badRequest(`Dataset ${sst.id} is a ${sst.kind} series, not sea-surface temperature`);
       if (sst.status === 'rejected') throw notConfigured('INPUT_DATA_UNAVAILABLE', 'The selected temperature series was rejected and cannot be used');
-      if (sst.scope !== 'citywide-annual-average') {
-        warnings.push('The temperature series is not citywide; the paper model is defined for the citywide annual average.');
-      }
+      if (request.profile === 'paper' && sst.status !== 'validated') throw notConfigured('INPUT_DATA_UNAVAILABLE', 'The SST dataset still needs independent review');
+      if (sst.scope !== 'citywide-annual-average') throw badRequest('The SST series must be a citywide annual average');
+      if (!/\bSST\b|sea[ -]?surface[ -]?temperature/i.test(`${sst.label} ${sst.sourceCitation}`) || /\bair[ -]?temperature\b/i.test(`${sst.label} ${sst.sourceCitation}`)) throw badRequest('The temperature series is not documented as SST');
+      if (valueAtYear(sst.records, request.baselineYear) === null) throw badRequest('The baseline year has no observed SST value in the selected dataset; interpolation or extrapolation needs a documented method');
       sources.push(datasetService.toSourceRecord(sst));
     } else {
       warnings.push('No sea-surface temperature series was attached; the configured T0 and gamma values were used without an imported source.');
@@ -100,9 +134,9 @@ export class PredictionService {
     if (tourism) {
       if (tourism.kind !== 'tourism') throw badRequest(`Dataset ${tourism.id} is a ${tourism.kind} series, not tourist arrivals`);
       if (tourism.status === 'rejected') throw notConfigured('INPUT_DATA_UNAVAILABLE', 'The selected tourism series was rejected and cannot be used');
-      if (tourism.scope !== 'citywide-annual-average') {
-        warnings.push('The tourism series is not citywide annual arrivals; the paper model requires that scope.');
-      }
+      if (request.profile === 'paper' && tourism.status !== 'validated') throw notConfigured('INPUT_DATA_UNAVAILABLE', 'The tourism dataset still needs independent review');
+      if (tourism.scope !== 'citywide-annual-average') throw badRequest('The tourism series must be citywide annual arrivals');
+      if (valueAtYear(tourism.records, request.baselineYear) === null) throw badRequest('The baseline year has no observed tourism value in the selected dataset; interpolation or extrapolation needs a documented method');
       sources.push(datasetService.toSourceRecord(tourism));
     } else {
       // Deliberately does not say the values were "configured": at this point a
@@ -184,9 +218,13 @@ export class PredictionService {
       if (tourism && copy.key === 'beta') {
         const arrivals = valueAtYear(tourism.records, baselineYear);
         if (arrivals !== null && copy.value !== null && copy.value > 0) {
-          const implied = -Math.log(0.99) / (copy.value * arrivals);
+          const instantaneousRate = copy.value * arrivals;
+          // Reported as the raw driver rate only. Converting it to "percent of
+          // current cover per year" is misleading: the model's actual loss also
+          // depends on the cover present each year, so the integrated
+          // percentage-point loss is added after the run instead.
           warnings.push(
-            `With beta = ${copy.value} and ${Math.round(arrivals)} annual arrivals, the tourism term alone removes about ${(implied * 100).toFixed(2)}% of cover each year. Confirm beta is the coefficient the paper intended, because its units are not stated.`
+            `The tourism driver rate is beta*V = ${instantaneousRate.toPrecision(4)} per year at ${Math.round(arrivals)} arrivals, before growth and thermal effects. This is a rate, not a cover loss; the run's cumulative tourism loss in percentage points is reported after the model runs. Beta's units still need confirmation.`
           );
         }
       }
@@ -302,22 +340,65 @@ export class PredictionService {
   public async create(input: CreatePredictionInput): Promise<CreatePredictionResponse> {
     let request = input.request;
 
+    // The forecast end is a boundary, not a second baseline. Normalize the
+    // duration once at the API boundary so every downstream consumer uses
+    // t=0 at the profile baseline.
+    const forecastEndYear = request.forecastEndYear ?? request.baselineYear + request.horizonYears;
+    const horizonYears = forecastEndYear - request.baselineYear;
+    if (forecastEndYear <= request.baselineYear || forecastEndYear > config.model.maxForecastYear || horizonYears < 1 || horizonYears > config.model.maxForecastHorizonYears) {
+      throw badRequest(
+        `The forecast ending year (${forecastEndYear}) must be after baseline year (${request.baselineYear}), no later than ${config.model.maxForecastYear}, and within a ${config.model.maxForecastHorizonYears}-year duration.`,
+        'INVALID_FORECAST_WINDOW'
+      );
+    }
+    request = { ...request, predictionStartYear: request.baselineYear, forecastEndYear, horizonYears };
+
     if (request.scope !== 'citywide-annual-average') {
       throw badRequest('The CCOverT paper model is citywide; reef-site scoped runs are not supported.');
     }
+    if (request.coralBaseline.surveyScope !== 'citywide-annual-average') {
+      throw badRequest('The coral-cover baseline must represent the citywide annual-average scope');
+    }
+    if (request.profile === 'paper' && !request.coralBaseline.surveyMethod?.trim()) {
+      throw badRequest('A paper-profile baseline requires a documented coral-cover survey method');
+    }
     if (request.profile === 'demo') await modelConfigService.assertDemoAllowed();
+    if (request.profile === 'paper-reproduction' && (request.coralBaseline.year !== request.baselineYear || request.coralBaseline.coverPercent !== 57)) {
+      throw badRequest(`Paper-reproduction requires C0 = 57% and coralBaseline.year = baselineYear (${request.baselineYear}).`, 'BASELINE_YEAR_MISMATCH');
+    }
 
-    const stored = await modelConfigService.getRunBase(request.profile);
+    const reproductionBase = request.profile === 'paper-reproduction'
+      ? await modelConfigService.getActive()
+      : null;
+    const stored = request.profile === 'paper-reproduction'
+      ? reproductionBase
+        ? {
+          ...reproductionBase,
+          version: 'paper-reproduction-1.0.0',
+          baselineYear: request.baselineYear,
+          initialCoverYear: request.baselineYear,
+          initialCoverPercent: 57,
+          parameters: reproductionBase.parameters.map((parameter) => ({ ...parameter }))
+        }
+        : null
+      : await modelConfigService.getRunBase(request.profile);
     if (!stored) {
       throw notConfigured(MODEL_PARAMETERS_NOT_CONFIGURED, 'No model configuration is active on this environment');
     }
     if (stored.studyAreaId !== request.studyAreaId) {
       throw badRequest(`The active model configuration targets ${stored.studyAreaId}, not ${request.studyAreaId}`);
     }
+    const configuredGrowth = stored.parameters.find((parameter) => parameter.key === 'g')?.value;
+    const reproductionPeriods = request.profile === 'paper-reproduction'
+      ? PAPER_REPRODUCTION_TOURISM_PERIODS.map((period, index) => index === PAPER_REPRODUCTION_TOURISM_PERIODS.length - 1 && configuredGrowth !== null && configuredGrowth !== undefined
+        ? { ...period, growthRate: configuredGrowth }
+        : { ...period })
+      : request.tourismGrowthPeriods;
     request = {
       ...request,
       sstDatasetId: stored.sstDatasetId ?? request.sstDatasetId,
-      tourismDatasetId: stored.tourismDatasetId ?? request.tourismDatasetId
+      tourismDatasetId: stored.tourismDatasetId ?? request.tourismDatasetId,
+      tourismGrowthPeriods: reproductionPeriods
     };
 
     if (input.idempotencyKey) {
@@ -331,7 +412,28 @@ export class PredictionService {
     }
 
     const { sst, tourism, sources, warnings } = await this.resolveDatasets(request);
-    const applied = this.applyDatasets(stored.parameters, sst, tourism, request.baselineYear);
+    const expectedBaselineYear = request.profile === 'paper-reproduction' ? request.baselineYear : stored.baselineYear;
+    if (request.baselineYear !== expectedBaselineYear || request.coralBaseline.year !== expectedBaselineYear) {
+      throw badRequest(
+        `${request.profile} profile baseline mismatch: request baselineYear=${request.baselineYear}, coralBaseline.year=${request.coralBaseline.year}, configured profile baselineYear=${expectedBaselineYear}`,
+        'BASELINE_YEAR_MISMATCH'
+      );
+    }
+    let applied = request.profile === 'paper-reproduction'
+      ? { parameters: stored.parameters.map((parameter) => ({ ...parameter })), warnings: [] as string[] }
+      : this.applyDatasets(stored.parameters, sst, tourism, request.baselineYear);
+    let reproductionWarnings: string[] = [];
+    if (request.profile === 'paper-reproduction') {
+      const periods = request.tourismGrowthPeriods ?? PAPER_REPRODUCTION_TOURISM_PERIODS;
+      const gParameter = applied.parameters.find((parameter) => parameter.key === 'g');
+      if (gParameter) {
+        gParameter.value = periods[periods.length - 1].growthRate;
+        gParameter.status = 'paper-inferred';
+        gParameter.provenance = 'Confirmed piecewise tourism configuration; g is represented by the stored period schedule.';
+        gParameter.notes = 'The model uses continuous piecewise growth; this scalar is retained for compatibility only.';
+      }
+      reproductionWarnings = [PAPER_REPRODUCTION_LABEL, 'Alpha = 0.05 per degree Celsius per year is a confirmed paper-reproduction value.', 'Tourism growth uses the versioned continuous piecewise configuration; no period resets V to V0.', `K and beta remain provisional/inferred. C0 = 57% at the selected ${request.baselineYear} start year is used; the paper reports conflicting 2006 values of 57.25% and 45.83%.`];
+    }
     const profiled = request.profile === 'demo'
       ? { parameters: this.applyDemoProfile(applied.parameters), warnings: [] as string[] }
       : { parameters: applied.parameters, warnings: [] as string[] };
@@ -343,13 +445,22 @@ export class PredictionService {
       ? { parameters: parametersForModel.map((parameter) => ({ ...parameter })), warnings: [] as string[] }
       : this.resolveInactiveAlpha(parametersForModel, request.horizonYears);
     const parameters = alphaResolution.parameters;
-    const allWarnings = [...warnings, ...applied.warnings, ...assumed.warnings, ...alphaResolution.warnings];
+    for (const parameter of parameters) {
+      if (parameter.value !== null) validateParameterValue(parameter.key, parameter.value);
+    }
+    const allWarnings = [...reproductionWarnings, ...warnings, ...applied.warnings, ...assumed.warnings, ...alphaResolution.warnings];
+    if (request.profile === 'paper-reproduction' && request.baselineYear + request.horizonYears > 2026) {
+      allWarnings.push(FUTURE_TOURISM_PROJECTION_WARNING);
+    }
     if (request.profile === 'scenario') {
       allWarnings.unshift(SCENARIO_DISCLAIMER);
     }
     const missing = parameters.filter((parameter) => parameter.value === null || !Number.isFinite(parameter.value));
     if (missing.length > 0) {
       const detail = missing.map((parameter) => `${parameter.key} (${parameter.status})`).join(', ');
+      if (request.profile === 'paper-reproduction' && missing.some((parameter) => parameter.key === 'alpha')) {
+        throw badRequest('Paper-reproduction refused: SST exceeds Tcrit and alpha was not explicitly supplied', 'ALPHA_REQUIRED_FOR_THERMAL_CROSSING', detail);
+      }
       if (request.profile === 'scenario') {
         throw badRequest(
           `This scenario still cannot run: no value is available or was assumed for ${detail}. Add an assumed value for every missing parameter.`,
@@ -358,6 +469,11 @@ export class PredictionService {
         );
       }
       throw notConfigured(MODEL_PARAMETERS_NOT_CONFIGURED, `The model cannot run: no value is configured for ${detail}`, detail);
+    }
+    if (request.profile === 'paper') {
+      const inactiveAlpha = parameters.some((parameter) => parameter.key === 'alpha' && parameter.status === 'not-required-for-horizon');
+      const readiness = await modelConfigService.paperReadiness(stored, inactiveAlpha);
+      if (!readiness.ready) throw notConfigured(MODEL_PARAMETERS_NOT_CONFIGURED, `The paper profile is not research-ready: ${readiness.reasons.join('; ')}`);
     }
     const gParameter = parameterByKey(parameters, 'g');
     if (request.profile === 'paper' && gParameter && !gParameter.sourceDatasetId) {
@@ -383,6 +499,7 @@ export class PredictionService {
       profile: request.profile,
       baseline_year: request.baselineYear,
       horizon_years: request.horizonYears,
+      forecast_end_year: request.forecastEndYear ?? request.baselineYear + request.horizonYears,
       coral_baseline: {
         cover_percent: request.coralBaseline.coverPercent,
         year: request.coralBaseline.year,
@@ -420,7 +537,11 @@ export class PredictionService {
         interval_mean_quadrature: SOLVER_DEFAULTS.intervalMeanQuadrature,
         state_output: SOLVER_DEFAULTS.stateOutput
       },
-      model_config_version: stored.version,
+      model_config_version: request.profile === 'paper-reproduction' ? 'paper-reproduction-1.0.0' : stored.version,
+      tourism_growth_periods: request.profile === 'paper-reproduction' ? (request.tourismGrowthPeriods ?? PAPER_REPRODUCTION_TOURISM_PERIODS).map((period) => ({
+        start_year: period.startYear, end_year: period.endYear, growth_rate: period.growthRate, unit: period.unit,
+        provenance: period.provenance, review_status: period.reviewStatus, effective_date: period.effectiveDate
+      })) : undefined,
       sources: sources.map((source) => ({
         name: source.name,
         source: source.source,
@@ -448,20 +569,38 @@ export class PredictionService {
     }
 
     const predictionId = crypto.randomUUID();
+
+    // The actual continuous-model tourism loss, integrated over the horizon.
+    // This replaces the instantaneous driver rate that used to be presented as
+    // a percentage of cover, which was not the model's cover loss.
+    const tourismLossPp = result.annual.reduce((sum, point) => sum + point.tourismContributionPp, 0);
+    const thermalLossPp = result.annual.reduce((sum, point) => sum + point.thermalContributionPp, 0);
+    if (parameterByKey(parameters, 'beta')?.value) {
+      result.warnings = [
+        ...result.warnings,
+        `Over the full horizon the continuous model attributes a cumulative tourism loss of ${tourismLossPp.toFixed(2)} percentage points of coral cover (summed interval-mean tourism contribution), against a net change of ${(result.finalCoverPercent - result.initialCoverPercent).toFixed(2)} percentage points and a thermal loss of ${thermalLossPp.toFixed(2)} percentage points. Components are additive rate contributions and are not a causal decomposition.`
+      ];
+    }
+
     const record: PredictionRecordStored = {
       _id: predictionId,
       id: predictionId,
       userId: input.userId,
-      status: result.isDemo ? 'demo' : result.isScenario ? 'scenario' : 'computed',
+      status: result.isDemo ? 'demo' : result.isScenario ? 'scenario' : request.profile === 'paper-reproduction' ? 'paper-reproduction' : 'computed',
+      validationStatus: 'not-validated',
       isDemo: result.isDemo,
       isScenario: result.isScenario,
+      isPaperReproduction: request.profile === 'paper-reproduction',
+      alphaResolution: parameters.some((parameter) => parameter.key === 'alpha' && parameter.status === 'not-required-for-horizon') ? 'inactive-for-horizon' : 'explicit',
+      tourismGrowthPeriods: request.tourismGrowthPeriods,
       // Stored with the run so the assumptions survive independently of the
       // echoed parameter list.
       assumptions: request.profile === 'scenario' ? request.assumedValues : [],
       requestId,
       equationVersion: result.equationVersion,
       modelVersion: result.modelVersion,
-      modelConfigVersion: stored.version,
+      modelConfigVersion: request.profile === 'paper-reproduction' ? 'paper-reproduction-1.0.0' : stored.version,
+      modelConfigBaselineYear: stored.baselineYear,
       targetMeasure: result.targetMeasure || TARGET_MEASURE,
       studyArea: {
         id: result.studyAreaId,
@@ -471,7 +610,9 @@ export class PredictionService {
       },
       scope: result.scope,
       baselineYear: result.baselineYear,
+      predictionStartYear: result.baselineYear,
       horizonYears: result.horizonYears,
+      forecastEndYear: result.baselineYear + result.horizonYears,
       initialCoverPercent: result.initialCoverPercent,
       finalCoverPercent: result.finalCoverPercent,
       finalIntervalMeanPercent: result.finalIntervalMeanPercent,
@@ -496,6 +637,68 @@ export class PredictionService {
       finalCoverPercent: saved.finalCoverPercent
     });
     return { prediction: toPublicRecord(saved), replayed: false };
+  }
+
+  /** Persist refused/upstream-failed attempts without presenting them as model output. */
+  public async recordFailure(input: RecordPredictionFailureInput): Promise<PredictionRecordStored> {
+    if (input.idempotencyKey) {
+      const existing = await db.findPredictionByIdempotencyKey(input.userId, input.idempotencyKey);
+      if (existing) return existing;
+    }
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const record: PredictionRecordStored = {
+      _id: id,
+      id,
+      userId: input.userId,
+      status: 'unavailable',
+      validationStatus: 'not-validated',
+      isDemo: false,
+      isScenario: input.request.profile === 'scenario',
+      isPaperReproduction: input.request.profile === 'paper-reproduction',
+      alphaResolution: 'explicit',
+      tourismGrowthPeriods: input.request.tourismGrowthPeriods,
+      assumptions: input.request.assumedValues,
+      requestId: crypto.randomUUID(),
+      equationVersion: 'not-run',
+      modelVersion: 'not-run',
+      modelConfigVersion: input.request.profile === 'paper-reproduction' ? 'paper-reproduction-1.0.0' : 'not-resolved',
+      modelConfigBaselineYear: input.request.profile === 'paper-reproduction' ? 2006 : undefined,
+      targetMeasure: TARGET_MEASURE,
+      studyArea: {
+        id: input.request.studyAreaId,
+        label: STUDY_AREA.label,
+        scope: input.request.scope,
+        description: `${STUDY_AREA.label} (${input.request.scope})`
+      },
+      scope: input.request.scope,
+      baselineYear: input.request.baselineYear,
+      predictionStartYear: input.request.predictionStartYear ?? input.request.baselineYear,
+      horizonYears: input.request.horizonYears,
+      forecastEndYear: input.request.forecastEndYear ?? input.request.baselineYear + input.request.horizonYears,
+      initialCoverPercent: input.request.coralBaseline.coverPercent,
+      finalCoverPercent: input.request.coralBaseline.coverPercent,
+      finalIntervalMeanPercent: input.request.coralBaseline.coverPercent,
+      stateClassification: null,
+      meanClassification: null,
+      classificationConvention: CONDITION_CONVENTION,
+      annual: [],
+      parameters: [],
+      solver: {
+        method: SOLVER_DEFAULTS.method,
+        substepsPerYear: input.request.solver.substepsPerYear,
+        intervalMeanQuadrature: SOLVER_DEFAULTS.intervalMeanQuadrature,
+        stateOutput: SOLVER_DEFAULTS.stateOutput,
+        notes: SOLVER_DEFAULTS.notes
+      },
+      sources: [],
+      warnings: [input.reason],
+      failureReason: input.reason,
+      request: input.request,
+      idempotencyKey: input.idempotencyKey,
+      createdAt: now
+    };
+    return db.createPrediction(record);
   }
 
   public async owned(id: string, userId: string): Promise<PredictionRecordStored> {

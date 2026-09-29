@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { DashboardResponse } from '@ccovert/shared';
 import { dashboardApi, getErrorMessage } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { AppShell, PageHeader } from '../components/AppShell';
 import { EmptyState, ErrorState, LoadingState, Notice } from '../components/States';
-import { PredictionSummaryCard, ReferenceChart, WarningList } from '../components/ReferenceChart';
+import { PredictionSummaryCard, ReferenceChart } from '../components/ReferenceChart';
 import { PAPER_REPORTED_AVERAGE_COVER, PAPER_REPORTED_PROJECTED_COVER } from '@ccovert/shared';
 
 export function HomePage(): JSX.Element {
+  const { user } = useAuth();
+  const clientMode = user?.role === 'client' || user?.role === 'user';
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [error, setError] = useState('');
 
@@ -39,17 +42,12 @@ export function HomePage(): JSX.Element {
         {dashboard && (
           <>
             <div className="dashboard-quadrant">
-              <section className="panel dashboard-quadrant-card dashboard-overview">
-                <div className="panel-heading">
-                  <div><p className="eyebrow">Snapshot</p><h2>Workspace overview</h2></div>
-                </div>
-                <div className="dashboard-metrics">
-                  <div className="stat-card"><span className="metric-label">Saved predictions</span><span className="metric-large">{dashboard.predictionCount}</span></div>
-                  <div className="stat-card"><span className="metric-label">AI reports</span><span className="metric-large">{dashboard.aiReportCount}</span></div>
-                  <div className="stat-card"><span className="metric-label">Available datasets</span><span className="metric-large">{dashboard.datasetCount}</span></div>
-                  <div className="stat-card"><span className="metric-label">Study area</span><span className="metric-large">{dashboard.studyArea.label.split(',')[0]}</span></div>
-                </div>
-              </section>
+              <div className="dashboard-metrics dashboard-overview-metrics">
+                <div className="stat-card"><span className="metric-label">Saved predictions</span><span className="metric-large">{dashboard.predictionCount}</span></div>
+                <div className="stat-card"><span className="metric-label">AI reports</span><span className="metric-large">{dashboard.aiReportCount}</span></div>
+                <div className="stat-card"><span className="metric-label">Available datasets</span><span className="metric-large">{dashboard.datasetCount}</span></div>
+                <div className="stat-card"><span className="metric-label">Study area</span><span className="metric-large">{dashboard.studyArea.label.split(',')[0]}</span></div>
+              </div>
 
               <section className="panel dashboard-quadrant-card dashboard-latest">
                 <div className="panel-heading">
@@ -59,7 +57,6 @@ export function HomePage(): JSX.Element {
                 {dashboard.latestPrediction ? (
                   <>
                     <PredictionSummaryCard prediction={dashboard.latestPrediction} onOpen={(id) => { window.location.href = `/history?prediction=${id}`; }} />
-                    <WarningList warnings={dashboard.latestPrediction.warnings} />
                   </>
                 ) : (
                   <EmptyState title="No saved predictions yet">
@@ -68,17 +65,6 @@ export function HomePage(): JSX.Element {
                   </EmptyState>
                 )}
               </section>
-
-              <aside className="panel dashboard-quadrant-card dashboard-scope">
-                <div className="panel-heading"><div><p className="eyebrow">Location</p><h2>Scope</h2></div></div>
-                <p>{dashboard.locationStatus.message}</p>
-                <dl className="detail-list">
-                  <div><dt>Study area</dt><dd>{dashboard.studyArea.label}</dd></div>
-                  <div><dt>Scope</dt><dd>{dashboard.studyArea.scope}</dd></div>
-                  <div><dt>Site-level forecast</dt><dd>Not available</dd></div>
-                  <div><dt>Consented location stored</dt><dd>{dashboard.locationStatus.consentedLocation ? 'Yes, context only' : 'No'}</dd></div>
-                </dl>
-              </aside>
 
               <section className="panel dashboard-quadrant-card dashboard-history">
                 <div className="panel-heading"><div><p className="eyebrow">History</p><h2>Recent runs</h2></div></div>
@@ -92,10 +78,10 @@ export function HomePage(): JSX.Element {
               </section>
             </div>
 
-            <div className="two-chart-grid">
+            {!clientMode && <div className="two-chart-grid">
               <ReferenceChart points={PAPER_REPORTED_AVERAGE_COVER} title="Paper-reported average cover" description="Reference only, never a model input." />
               <ReferenceChart points={PAPER_REPORTED_PROJECTED_COVER} title="Paper-reported projection" description="Reproduced as printed, conflicts included." />
-            </div>
+            </div>}
           </>
         )}
       </div>

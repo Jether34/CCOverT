@@ -29,6 +29,7 @@ export class ApiRequestError extends Error {
   public readonly code: string;
   public readonly details: unknown;
   public readonly requestId: string | undefined;
+  public readonly prediction: PredictionRecord | undefined;
 
   constructor(status: number, body: ApiErrorBody) {
     super(body.error.message);
@@ -37,6 +38,7 @@ export class ApiRequestError extends Error {
     this.code = body.error.code;
     this.details = body.error.details;
     this.requestId = body.error.requestId;
+    this.prediction = body.prediction;
   }
 }
 
@@ -74,6 +76,7 @@ export const api = {
   get: <T>(path: string): Promise<T> => request<T>(path),
   post: <T>(path: string, data?: unknown, headers?: Record<string, string>): Promise<T> =>
     request<T>(path, { method: 'POST', body: data === undefined ? undefined : JSON.stringify(data), headers }),
+  put: <T>(path: string, data: unknown): Promise<T> => request<T>(path, { method: 'PUT', body: JSON.stringify(data) }),
   patch: <T>(path: string, data: unknown): Promise<T> => request<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' }),
   upload: <T>(path: string, formData: FormData): Promise<T> => request<T>(path, { method: 'POST', body: formData })
@@ -81,9 +84,10 @@ export const api = {
 
 export const authApi = {
   me: () => api.get<{ user: User }>('/auth/me'),
-  login: (email: string, password: string) => api.post<{ user: User }>('/auth/login', { email, password }),
-  signup: (email: string, password: string) =>
-    api.post<{ user: User; verificationRequired?: boolean; developmentVerificationUrl?: string }>('/auth/signup', { email, password }),
+  login: (email: string, password: string, captchaToken?: string) => api.post<{ user?: User; otpRequired: boolean; email?: string }>('/auth/login', { email, password, captchaToken }),
+  verifyLoginOtp: (email: string, code: string) => api.post<{ user: User }>('/auth/login/otp', { email, code }),
+  signup: (email: string, password: string, paperSite?: string, captchaToken?: string) =>
+    api.post<{ user: User; verificationRequired?: boolean; developmentVerificationUrl?: string }>('/auth/signup', { email, password, paperSite, captchaToken }),
   verify: (token: string) => api.post<{ user: User; verified: boolean }>('/auth/verify', { token }),
   forgotPassword: (email: string) => api.post<{ accepted: boolean }>('/auth/forgot-password', { email }),
   resetPassword: (token: string, password: string) => api.post<{ reset: boolean }>('/auth/reset-password', { token, password }),
@@ -96,7 +100,8 @@ export const preferencesApi = {
 
 export const modelApi = {
   status: () => api.get<{ status: ModelStatus }>('/model/status'),
-  parameters: () => api.get<{ activeVersion: string | null; parameters: ModelParameter[]; solver: SolverSettings }>('/model/parameters'),
+  parameters: () => api.get<{ activeVersion: string | null; baselineYear: number; horizonYears: number; initialCoverPercent: number; initialCoverYear: number; initialCoverSource: string; parameters: ModelParameter[]; solver: SolverSettings }>('/model/parameters'),
+  updateConfiguration: (input: { changes: Record<string, number>; notes: string }) => api.put<{ version: ModelConfig }>('/model/configuration', input),
   versions: () => api.get<{ versions: ModelConfig[] }>('/model/versions'),
   createVersion: (input: {
     baseVersion: string;
@@ -107,6 +112,11 @@ export const modelApi = {
     sourceDatasetIds?: Record<string, string>;
     sstDatasetId?: string | null;
     tourismDatasetId?: string | null;
+    baselineYear?: number;
+    horizonYears?: number;
+    initialCoverPercent?: number;
+    initialCoverYear?: number;
+    initialCoverSource?: string;
   }) => api.post<{ version: ModelConfig }>('/model/versions', input),
   activateVersion: (id: string) => api.post<{ version: ModelConfig }>(`/model/versions/${encodeURIComponent(id)}/activate`),
   archiveVersion: (id: string) => api.delete<void>(`/model/versions/${encodeURIComponent(id)}`)
@@ -156,11 +166,14 @@ export interface ScenarioAssumptionForm {
 }
 
 export interface PredictionRequestForm {
-  profile: 'paper' | 'demo' | 'scenario';
+  profile: 'paper' | 'demo' | 'scenario' | 'paper-reproduction';
   baselineYear: number;
   horizonYears: number;
+  forecastEndYear?: number;
   coverPercent: number;
+  coralBaselineYear?: number;
   surveySource: string;
+  surveyMethod: string;
   sstDatasetId: string | null;
   tourismDatasetId: string | null;
   consentedLocation: { latitude: number; longitude: number; accuracyMeters: number | null; consentedAt: string; contextOnly: true } | null;
@@ -177,13 +190,15 @@ export const predictionsApi = {
       profile: input.profile,
       baselineYear: input.baselineYear,
       horizonYears: input.horizonYears,
+      forecastEndYear: input.forecastEndYear ?? input.baselineYear + input.horizonYears,
       coralBaseline: {
         coverPercent: input.coverPercent,
-        year: input.baselineYear,
+        year: input.coralBaselineYear ?? input.baselineYear,
         hardCoralPercent: null,
         softCoralPercent: null,
         measure: '%LCC (HC+SC)',
         surveySource: input.surveySource,
+        surveyMethod: input.surveyMethod,
         surveyScope: 'citywide-annual-average',
         sameScopeConfirmed: true
       },
@@ -198,7 +213,7 @@ export const predictionsApi = {
   list: (limit = 100) => api.get<PredictionListResponse>(`/predictions?limit=${limit}`),
   get: (id: string) => api.get<{ prediction: PredictionRecord }>(`/predictions/${encodeURIComponent(id)}`),
   reportsFor: (id: string) => api.get<{ reports: AiReport[] }>(`/predictions/${encodeURIComponent(id)}/reports`),
-  downloadUrl: (id: string, format: 'markdown' | 'csv' | 'json') =>
+  downloadUrl: (id: string, format: 'pdf' | 'csv') =>
     `${BASE}/predictions/${encodeURIComponent(id)}/download?format=${format}`
 };
 
@@ -227,12 +242,23 @@ export const researchApi = {
   summary: () => api.get<ResearchSummary>('/research')
 };
 
-export const downloadPrediction = (id: string, format: 'markdown' | 'csv' | 'json'): void => {
+export const downloadPrediction = (id: string, format: 'pdf' | 'csv'): void => {
   window.location.href = predictionsApi.downloadUrl(id, format);
 };
 
-export const getErrorMessage = (error: unknown): string =>
-  error instanceof ApiRequestError ? error.message : 'Something went wrong. Please try again.';
+const describeDetails = (details: unknown): string | null => {
+  if (typeof details !== 'string') return null;
+  const trimmed = details.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+/** The server sends a field-level `details` string alongside the generic message. Surface both. */
+export const getErrorMessage = (error: unknown): string => {
+  if (!(error instanceof ApiRequestError)) return 'Something went wrong. Please try again.';
+  const details = describeDetails(error.details);
+  if (details === null || details === error.message) return error.message;
+  return `${error.message} ${details}`;
+};
 
 export const getErrorCode = (error: unknown): string =>
   error instanceof ApiRequestError ? error.code : 'UNKNOWN';

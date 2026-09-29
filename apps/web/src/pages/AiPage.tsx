@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { AiReport, PredictionRecord } from '@ccovert/shared';
-import { aiApi, getErrorMessage, predictionsApi, uploadsApi } from '../lib/api';
+import { aiApi, getErrorMessage, predictionsApi } from '../lib/api';
 import { AppShell, PageHeader } from '../components/AppShell';
 import { EmptyState, Notice } from '../components/States';
 import { ConditionBadge, WarningList } from '../components/ReferenceChart';
@@ -11,12 +11,10 @@ export function AiPage(): JSX.Element {
   const [predictions, setPredictions] = useState<PredictionRecord[]>([]);
   const [reports, setReports] = useState<AiReport[]>([]);
   const [selectedPredictions, setSelectedPredictions] = useState<string[]>(params.get('prediction') ? [params.get('prediction') as string] : []);
-  const [selectedUploads, setSelectedUploads] = useState<string[]>([]);
   const [active, setActive] = useState<AiReport | null>(null);
+  const [reportExpanded, setReportExpanded] = useState(true);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [dragging, setDragging] = useState(false);
 
   const load = useCallback(() => {
     predictionsApi.list(200).then((response) => setPredictions(response.predictions)).catch(() => setPredictions([]));
@@ -36,9 +34,9 @@ export function AiPage(): JSX.Element {
     try {
       const response = await aiApi.createReport({
         predictionIds: selectedPredictions,
-        uploadIds: selectedUploads,
       });
       setActive(response.report);
+      setReportExpanded(true);
       setReports((current) => [response.report, ...current]);
     } catch (generateError) {
       setError(getErrorMessage(generateError));
@@ -47,34 +45,13 @@ export function AiPage(): JSX.Element {
     }
   };
 
-  const uploadDocument = async (file: File): Promise<void> => {
-    setError('');
-    setUploading(true);
-    try {
-      const response = await uploadsApi.upload(file);
-      setSelectedUploads((current) => current.includes(response.upload.id) ? current : [...current, response.upload.id]);
-      load();
-    } catch (uploadError) {
-      setError(getErrorMessage(uploadError));
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const dropFile = (event: React.DragEvent<HTMLLabelElement>): void => {
-    event.preventDefault();
-    setDragging(false);
-    const file = event.dataTransfer.files[0];
-    if (file) void uploadDocument(file);
-  };
-
   return (
     <AppShell>
-      <div className="page-container">
+      <div className="page-container ai-page">
         <PageHeader
           eyebrow="Reports"
           title="AI reports"
-          description="Drop a report or choose saved prediction history. CCOverT will interpret only the evidence you select."
+          description="Choose your evidence, generate an interpretation, then reopen saved reports from the library."
         />
 
         {error && <Notice tone="danger" title="Report request failed">{error}</Notice>}
@@ -82,63 +59,60 @@ export function AiPage(): JSX.Element {
         <div className="ai-layout">
           <form className="form-panel ai-builder" onSubmit={generate} noValidate>
             <fieldset disabled={pending}>
+              <div className="ai-step-heading"><span className="ai-step-number">1</span><div><p className="eyebrow">Evidence</p><h2>Choose prediction history</h2><p className="muted">Select one or more saved prediction runs for interpretation.</p></div></div>
               <div className="ai-source-grid">
-                <label
-                  className={`upload-dropzone ${dragging ? 'is-dragging' : ''}`}
-                  htmlFor="document"
-                  onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
-                  onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={dropFile}
-                >
-                  <span className="material-symbols-rounded upload-dropzone-icon" aria-hidden="true">upload_file</span>
-                  <strong>{uploading ? 'Uploading file' : 'Drop a report here'}</strong>
-                  <span className="muted">PDF, TXT, CSV, or JSON</span>
-                  <span className="button button-small button-secondary">Choose a file</span>
-                  <input id="document" type="file" accept=".pdf,.txt,.csv,.json" disabled={uploading}
-                    onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadDocument(file); }} />
-                </label>
-
                 <div className="prediction-history-picker">
-                  <div className="panel-heading"><div><p className="eyebrow">Evidence</p><h2>Select prediction history</h2></div></div>
+                  <div className="panel-heading"><div><p className="eyebrow">Saved runs</p><h2>Prediction history</h2></div><span className="condition-badge condition-good">{selectedPredictions.length} selected</span></div>
                   {predictions.length === 0 && <EmptyState title="No saved predictions">
-                    <p>Run a prediction first, or drop a report to analyze its contents.</p>
+                    <p>Run a prediction first to create an AI interpretation.</p>
                     <Link className="button button-primary" to="/predict">Run a prediction</Link>
                   </EmptyState>}
-                  <div className="reference-list">
+                  <div className="ai-prediction-list">
                     {predictions.map((prediction) => (
-                      <label className="checkbox-field" key={prediction.predictionId} htmlFor={`prediction-${prediction.predictionId}`}>
+                      <label className="ai-prediction-card" key={prediction.predictionId} htmlFor={`prediction-${prediction.predictionId}`}>
                         <input
                           id={`prediction-${prediction.predictionId}`}
                           type="checkbox"
                           checked={selectedPredictions.includes(prediction.predictionId)}
                           onChange={() => toggle(selectedPredictions, prediction.predictionId, setSelectedPredictions)}
                         />
-                        {prediction.baselineYear}-{prediction.baselineYear + prediction.horizonYears} &middot; {prediction.finalCoverPercent.toFixed(2)}%
-                        {prediction.isDemo && <> <ConditionBadge label="DEMO" status="danger" /></>}
-                        {prediction.isScenario && <> <ConditionBadge label="SCENARIO - exploratory" status="danger" /></>}
+                        <span className="ai-prediction-card-body">
+                          <span className="card-kicker">
+                            <span>{prediction.targetMeasure}</span>
+                            {prediction.isDemo
+                              ? <ConditionBadge label="DEMO" status="danger" />
+                              : prediction.isScenario
+                                ? <ConditionBadge label="SCENARIO - exploratory" status="danger" />
+                                : prediction.status === 'unavailable'
+                                  ? <ConditionBadge label="Not completed" status="unavailable" />
+                                  : <ConditionBadge label="Model projection" status="good" />}
+                          </span>
+                          <strong className="ai-prediction-value">{prediction.status === 'unavailable' ? 'Not completed' : `${prediction.finalCoverPercent.toFixed(2)}%`}</strong>
+                          <span className="muted">{prediction.baselineYear} ({prediction.initialCoverPercent.toFixed(2)}%) to {prediction.baselineYear + prediction.horizonYears}</span>
+                          <span className="muted">Created {new Date(prediction.createdAt).toLocaleDateString()}</span>
+                        </span>
                       </label>
                     ))}
                   </div>
                 </div>
               </div>
-              <p className="form-hint">Select at least one prediction or upload one file. Uploaded evidence is private to your account.</p>
-              <button className="button button-primary button-wide" type="submit" disabled={pending || (selectedPredictions.length === 0 && selectedUploads.length === 0)}>
-                {pending ? 'Analyzing evidence' : 'Analyze selected evidence'}
+              <p className="form-hint">Select at least one saved prediction. Reports use only your prediction history.</p>
+              <button className="button button-primary button-wide" type="submit" disabled={pending || selectedPredictions.length === 0}>
+                {pending ? 'Generating report' : 'Generate report from selected evidence'}
               </button>
             </fieldset>
           </form>
 
-          <section className="report-panel">
-            <div className="panel-heading"><div><p className="eyebrow">Output</p><h2>{active ? active.title : 'No report selected'}</h2></div></div>
+          <section className={`report-panel ${active && !reportExpanded ? 'report-panel-collapsed' : ''}`}>
+            <div className="ai-step-heading"><span className="ai-step-number">2</span><div><p className="eyebrow">Output</p><h2>{active ? active.title : 'Report preview'}</h2><p className="muted">Your deterministic or provider-generated interpretation appears here.</p></div>{active && <button className="button button-small button-secondary" type="button" onClick={() => setReportExpanded((expanded) => !expanded)}>{reportExpanded ? 'Collapse report' : 'View full report'}</button>}</div>
             {active && (
               <>
                 <p className="muted">
                   Generated by {active.generatedBy}
                   {active.model ? ` (${active.model})` : ''} on {new Date(active.createdAt).toLocaleString()}
                 </p>
-                <WarningList warnings={active.warnings} title="Report warnings" />
-                <div className="report-content">
+                {reportExpanded && <WarningList warnings={active.warnings} title="Report warnings" />}
+                {reportExpanded && <div className="report-content">
                   {active.body.split('\n').map((line, index) => (
                     line.startsWith('# ') || line.startsWith('## ')
                       ? <h3 key={index}>{line.replace(/^#+ /, '')}</h3>
@@ -146,8 +120,8 @@ export function AiPage(): JSX.Element {
                         ? <p className="muted" key={index}>&bull; {line.slice(2)}</p>
                         : <p key={index}>{line}</p>
                   ))}
-                </div>
-                {active.citations.length > 0 && (
+                </div>}
+                {reportExpanded && active.citations.length > 0 && (
                   <>
                     <h3>Citations</h3>
                     <ol className="reference-list">
@@ -166,22 +140,20 @@ export function AiPage(): JSX.Element {
           </section>
         </div>
 
-        <section className="panel">
-          <div className="panel-heading"><div><p className="eyebrow">Library</p><h2>Previous reports</h2></div></div>
+        <section className="panel ai-library">
+          <div className="ai-step-heading"><span className="ai-step-number">3</span><div><p className="eyebrow">Library</p><h2>Saved reports</h2><p className="muted">Open a previous report to review its evidence and interpretation.</p></div></div>
           {reports.length === 0 ? <p className="muted">No reports yet.</p> : (
-            <div className="record-list">
+            <div className="ai-library-list">
               {reports.map((report) => (
-                <article className="record-grid" key={report.id}>
-                  <div>
-                    <ConditionBadge label={report.generatedBy} status={report.generatedBy === 'ai-provider' ? 'good' : 'warning'} />
-                    <p className="muted">{new Date(report.createdAt).toLocaleDateString()}</p>
+                <article className="ai-library-card" key={report.id}>
+                  <div className="ai-library-card-meta">
+                    <ConditionBadge label={report.generatedBy === 'ai-provider' ? 'AI report' : 'Deterministic summary'} status={report.generatedBy === 'ai-provider' ? 'good' : 'warning'} />
+                    <span className="muted">{new Date(report.createdAt).toLocaleDateString()}</span>
                   </div>
-                  <div>
+                  <div className="ai-library-card-body">
                     <h3>{report.title}</h3>
-                    <p className="muted">
-                      {report.referencedPredictionIds.length} prediction(s), {report.referencedUploadIds.length} document(s), {report.citations.length} citation(s)
-                    </p>
-                    <button className="button button-small button-secondary" type="button" onClick={() => setActive(report)}>Open</button>
+                    <p className="muted">{report.referencedPredictionIds.length} prediction(s) · {report.referencedUploadIds.length} document(s) · {report.citations.length} citation(s)</p>
+                    <button className="button button-small button-secondary" type="button" onClick={() => { setActive(report); setReportExpanded(true); }}>Open report</button>
                   </div>
                 </article>
               ))}

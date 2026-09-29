@@ -19,6 +19,9 @@ import { errorHandler, notFoundHandler } from './utils/errors';
 import { logger } from './logger';
 import { recordActivity } from './services/activity';
 import { createDeveloperRouter } from './routes/developer';
+import { modelClient } from './services/modelClient';
+import { createAuthMiddleware } from './middleware/auth';
+import { asyncHandler } from './utils/errors';
 
 export interface AppDependencies {
   database?: Database;
@@ -54,6 +57,7 @@ export function createApp(dependencies: AppDependencies = {}): express.Express {
    */
   useDatabase(database);
   const app = express();
+  const responseCounts = new Map<number, number>();
   app.disable('x-powered-by');
   if (config.trustProxy) app.set('trust proxy', 1);
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
@@ -67,11 +71,16 @@ export function createApp(dependencies: AppDependencies = {}): express.Express {
 
   /** Every response carries a request id, echoed from the browser when present. */
   app.use((request, response, next) => {
+    const startedAt = Date.now();
     const incoming = request.get('x-request-id');
     const requestId = incoming && /^[\w-]{1,80}$/.test(incoming) ? incoming : randomUUID();
     request.requestId = requestId;
     response.setHeader('x-request-id', requestId);
-    response.on('finish', () => recordActivity({ kind: 'request', action: `${request.method} ${request.path}`, actorId: request.user?.id ?? null, status: response.statusCode }));
+    response.on('finish', () => {
+      responseCounts.set(response.statusCode, (responseCounts.get(response.statusCode) ?? 0) + 1);
+      recordActivity({ kind: 'request', action: `${request.method} ${request.path}`, actorId: request.user?.id ?? null, status: response.statusCode });
+      logger.info('HTTP request completed', { requestId, method: request.method, path: request.path, status: response.statusCode, durationMs: Date.now() - startedAt });
+    });
     next();
   });
 
@@ -95,6 +104,25 @@ export function createApp(dependencies: AppDependencies = {}): express.Express {
       database: database.isMemory ? 'memory' : 'mongodb',
       requestId: request.requestId
     });
+  });
+
+  app.get('/ready', asyncHandler(async (request, response) => {
+    const [databaseReady, modelReady] = await Promise.all([database.isReady(), modelClient.isAvailable()]);
+    response.status(databaseReady && modelReady ? 200 : 503).json({
+      status: databaseReady && modelReady ? 'ready' : 'not-ready',
+      database: databaseReady ? 'ready' : 'unavailable',
+      modelService: modelReady ? 'ready' : 'unavailable',
+      requestId: request.requestId
+    });
+  }));
+
+  app.get('/metrics', createAuthMiddleware(database).requireRole('admin'), (_request, response) => {
+    const lines = ['# TYPE ccovert_http_requests_total counter'];
+    for (const [status, count] of [...responseCounts.entries()].sort(([a], [b]) => a - b)) {
+      lines.push(`ccovert_http_requests_total{status="${status}"} ${count}`);
+    }
+    lines.push('# TYPE ccovert_process_uptime_seconds gauge', `ccovert_process_uptime_seconds ${process.uptime().toFixed(3)}`);
+    response.type('text/plain; version=0.0.4').send(`${lines.join('\n')}\n`);
   });
 
   const v1 = express.Router();

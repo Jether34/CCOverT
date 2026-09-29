@@ -1,22 +1,40 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { PredictionRecord } from '@ccovert/shared';
-import { SCENARIO_DISCLAIMER, SCENARIO_LABEL, SOLVER_DEFAULTS, STUDY_AREA, TARGET_MEASURE } from '@ccovert/shared';
-import { getErrorMessage, isNotConfigured, newIdempotencyKey, predictionsApi, type ScenarioAssumptionForm } from '../lib/api';
-import { useModelStatus } from '../context/AuthContext';
+import type { PaperBaselineOption, PredictionRecord } from '@ccovert/shared';
+import {
+  PAPER_BASELINE_OPTIONS,
+  PAPER_REPRODUCTION_LABEL,
+  PAPER_REPRODUCTION_TOURISM_PERIODS,
+  SCENARIO_DISCLAIMER,
+  SCENARIO_LABEL,
+  SOLVER_DEFAULTS,
+  STUDY_AREA,
+  TARGET_MEASURE
+} from '@ccovert/shared';
+import { ApiRequestError, getErrorMessage, isNotConfigured, modelApi, newIdempotencyKey, predictionsApi, type ScenarioAssumptionForm } from '../lib/api';
+import { useAuth, useModelStatus } from '../context/AuthContext';
 import { AppShell, PageHeader } from '../components/AppShell';
 import { Notice } from '../components/States';
-import { AnnualTable, ConditionBadge, WarningList } from '../components/ReferenceChart';
+import { AnnualTable, ConditionBadge } from '../components/ReferenceChart';
 import { requestBrowserLocation } from '../lib/location';
 
+const OWN_SURVEY = 'my-own-survey';
+const PAPER_REPRODUCTION_BASELINE_SOURCE = (year: string): string => `CCOverT paper-reproduction baseline, Puerto Princesa City, ${year}`;
+const PAPER_REPRODUCTION_BASELINE_METHOD = 'Paper-reproduction configured citywide annual-average baseline';
+
 interface FormState {
-  profile: 'paper' | 'demo' | 'scenario';
+  profile: 'paper' | 'demo' | 'scenario' | 'paper-reproduction';
+  baselineOptionId: string;
   coverPercent: string;
   baselineYear: string;
   horizonYears: string;
+  forecastEndYear?: string;
   surveySource: string;
+  surveyMethod: string;
   substepsPerYear: string;
   shareLocation: boolean;
+  startDate?: string;
+  endDate?: string;
   assumedAlpha: string;
   assumedAlphaUnit: string;
   assumedAlphaRationale: string;
@@ -31,12 +49,17 @@ interface FormState {
 
 const initialForm = (): FormState => ({
   profile: 'paper',
+  baselineOptionId: OWN_SURVEY,
   coverPercent: '',
   baselineYear: '2006',
   horizonYears: '10',
+  forecastEndYear: '2016',
   surveySource: '',
+  surveyMethod: '',
   substepsPerYear: String(SOLVER_DEFAULTS.substepsPerYear),
   shareLocation: false,
+  startDate: '2006-01-01',
+  endDate: '2016-12-31',
   assumedAlpha: '',
   assumedAlphaUnit: 'per degC per year',
   assumedAlphaRationale: '',
@@ -114,24 +137,127 @@ const numeric = (raw: string): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+/**
+ * Choosing a cited baseline fills the cover, year, source, and method together
+ * so the number can never drift from the citation it is attributed to. The year
+ * is embedded in the citation because the API rejects a baseline source without
+ * one. Choosing "my own survey" clears them again so nothing is left implying
+ * provenance that no longer applies.
+ */
+export const applyBaselineOption = (form: FormState, option: PaperBaselineOption | null): FormState =>
+  option === null
+    ? { ...form, baselineOptionId: OWN_SURVEY, coverPercent: '', surveySource: '', surveyMethod: '' }
+    : {
+      ...form,
+      baselineOptionId: option.id,
+      coverPercent: String(option.coverPercent),
+      baselineYear: String(option.year),
+      forecastEndYear: String(option.year + Number(form.horizonYears || 10)),
+      surveySource: option.source,
+      surveyMethod: option.method
+    };
+
+export const findBaselineOption = (id: string): PaperBaselineOption | null =>
+  PAPER_BASELINE_OPTIONS.find((option) => option.id === id) ?? null;
+
 export function PredictPage(): JSX.Element {
   const { status, missingKeys } = useModelStatus();
+  const { user } = useAuth();
+  // Researchers use the same client prediction experience. The researcher
+  // role controls the shared parameters from its dashboard, not a separate
+  // prediction profile or baseline workflow.
+  const clientMode = user?.role === 'client' || user?.role === 'user' || user?.role === 'researcher';
   const [form, setForm] = useState<FormState>(initialForm);
   const [result, setResult] = useState<PredictionRecord | null>(null);
   const [error, setError] = useState('');
   const [blockedReason, setBlockedReason] = useState('');
   const [pending, setPending] = useState(false);
   const [locationNote, setLocationNote] = useState('');
+  const [configuredWindow, setConfiguredWindow] = useState({ startDate: '2006-01-01', endDate: '2016-12-31', baselineYear: 2006 });
   const idempotencyKey = useRef(newIdempotencyKey());
 
   useEffect(() => {
     idempotencyKey.current = newIdempotencyKey();
   }, []);
 
+  useEffect(() => {
+    if (clientMode) {
+      setForm((current) => current.profile === 'paper-reproduction'
+        ? current
+        : {
+          ...current,
+          profile: 'paper-reproduction',
+          baselineYear: '2006',
+          coverPercent: '57',
+          startDate: '2006-01-01',
+          surveySource: current.surveySource || PAPER_REPRODUCTION_BASELINE_SOURCE(current.baselineYear),
+          surveyMethod: current.surveyMethod || PAPER_REPRODUCTION_BASELINE_METHOD
+        });
+    }
+  }, [clientMode]);
+
+  useEffect(() => {
+    void modelApi.parameters().then((configuration) => {
+      const startDate = `${configuration.baselineYear}-01-01`;
+      const endDate = `${configuration.baselineYear + configuration.horizonYears}-12-31`;
+      setConfiguredWindow({ startDate, endDate, baselineYear: configuration.baselineYear });
+      setForm((current) => current.profile === 'paper-reproduction'
+        ? current
+        : {
+          ...current,
+          baselineYear: String(configuration.baselineYear),
+          horizonYears: String(configuration.horizonYears),
+          forecastEndYear: String(configuration.baselineYear + configuration.horizonYears),
+          coverPercent: String(configuration.initialCoverPercent),
+          surveySource: configuration.initialCoverSource,
+          surveyMethod: 'Researcher-configured citywide annual average baseline',
+          startDate,
+          endDate
+        });
+    }).catch(() => undefined);
+  }, []);
+
   const update = <K extends keyof FormState>(key: K, value: FormState[K]): void =>
     setForm((current) => ({ ...current, [key]: value }));
 
+  const updateClientDate = (key: 'startDate' | 'endDate', value: string): void => {
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+      const baselineYear = Number(next.baselineYear);
+      if (key === 'startDate') {
+        const startYear = Number(value.slice(0, 4));
+        const endYear = Number((next.forecastEndYear ?? next.endDate ?? configuredWindow.endDate).toString().slice(0, 4));
+        if (Number.isFinite(startYear)) {
+          next.baselineYear = String(startYear);
+          next.startDate = value;
+          if (Number.isFinite(endYear) && endYear > startYear) next.horizonYears = String(endYear - startYear);
+        }
+        return next;
+      }
+      const endYear = Number((next.endDate ?? configuredWindow.endDate).slice(0, 4));
+      if (Number.isFinite(baselineYear) && Number.isFinite(endYear) && endYear > baselineYear) {
+        next.forecastEndYear = String(endYear);
+        next.horizonYears = String(endYear - baselineYear);
+      }
+      return next;
+    });
+  };
+
   const [assumptionErrors, setAssumptionErrors] = useState<Record<string, string>>({});
+  const [blockedKeys, setBlockedKeys] = useState<string[]>([]);
+
+  /**
+   * A refusal is only useful if it names a way forward. When the paper profile
+   * is blocked purely by parameters the paper never published, the only routes
+   * are to switch to an explicit scenario or wait for a researcher to configure
+   * them, so say that instead of leaving the user at a dead end.
+   */
+  const switchToScenario = (): void => {
+    setForm((current) => ({ ...current, profile: 'scenario' }));
+    setError('');
+    setBlockedReason('');
+    setBlockedKeys([]);
+  };
 
   const runPrediction = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
@@ -142,7 +268,10 @@ export function PredictPage(): JSX.Element {
     // run. The server is the only source of a fresh result.
     setResult(null);
     setLocationNote('');
-    if (!form.surveySource.trim()) {
+    const effectiveProfile = clientMode ? 'paper-reproduction' : form.profile;
+    const surveySource = form.surveySource.trim() || (effectiveProfile === 'paper-reproduction' ? PAPER_REPRODUCTION_BASELINE_SOURCE(form.baselineYear) : '');
+    const surveyMethod = form.surveyMethod.trim() || (effectiveProfile === 'paper-reproduction' ? PAPER_REPRODUCTION_BASELINE_METHOD : '');
+    if (!surveySource) {
       setError('Name the survey or report the baseline cover came from.');
       return;
     }
@@ -150,10 +279,10 @@ export function PredictPage(): JSX.Element {
     // A scenario run must say what it assumed, so this is validated in the
     // browser too: the server rejects it either way.
     const assumedValues: ScenarioAssumptionForm[] = [];
-    if (form.profile === 'scenario') {
+    if (effectiveProfile === 'scenario') {
       const drafts = assumptionDrafts(form);
       const problems: Record<string, string> = {};
-      for (const candidate of ASSUMABLE_KEYS) {
+      for (const candidate of ASSUMABLE_KEYS.filter((item) => form.profile === 'scenario' || item.key === 'alpha')) {
         const draft = drafts[candidate.key];
         const value = numeric(draft.value);
         const rationale = draft.rationale.trim();
@@ -200,7 +329,7 @@ export function PredictPage(): JSX.Element {
       }
       if (Object.keys(problems).length > 0) {
         setAssumptionErrors(problems);
-        setError('Every assumed value needs a number and a rationale before the scenario can run.');
+        setError('Every explicit assumption needs a number and a rationale before the run can start.');
         return;
       }
       if (assumedValues.length === 0) {
@@ -226,11 +355,14 @@ export function PredictPage(): JSX.Element {
           })
         : null;
       const response = await predictionsApi.create({
-        profile: form.profile,
+        profile: effectiveProfile,
         baselineYear: Number(form.baselineYear),
         horizonYears: Number(form.horizonYears),
+        forecastEndYear: Number(form.forecastEndYear ?? Number(form.baselineYear) + Number(form.horizonYears)),
         coverPercent: Number(form.coverPercent),
-        surveySource: form.surveySource.trim(),
+        coralBaselineYear: Number(form.baselineYear),
+        surveySource: effectiveProfile === 'paper-reproduction' ? PAPER_REPRODUCTION_BASELINE_SOURCE(form.baselineYear) : surveySource,
+        surveyMethod,
         sstDatasetId: null,
         tourismDatasetId: null,
         consentedLocation,
@@ -240,70 +372,160 @@ export function PredictPage(): JSX.Element {
       setResult(response.prediction);
       idempotencyKey.current = newIdempotencyKey();
     } catch (runError) {
-      if (isNotConfigured(runError)) setBlockedReason(getErrorMessage(runError));
-      else setError(getErrorMessage(runError));
+      if (runError instanceof ApiRequestError && runError.prediction) {
+        setResult(runError.prediction);
+      }
+      if (isNotConfigured(runError)) {
+        setBlockedReason(getErrorMessage(runError));
+        setBlockedKeys(status?.missingParameters.map((parameter) => parameter.key) ?? []);
+      } else {
+        setError(getErrorMessage(runError));
+      }
     } finally {
       setPending(false);
     }
   };
 
   const demoAllowed = Boolean(status?.demoProfileAvailable);
+  const selectedBaseline = findBaselineOption(form.baselineOptionId);
 
   return (
     <AppShell>
-      <div className="page-container">
+      <div className="page-container predict-page">
         <PageHeader
           eyebrow="Projection"
           title="Run a prediction"
           description={`${STUDY_AREA.label} annual average live coral cover (${TARGET_MEASURE}). Citywide scope only.`}
         />
 
-        {blockedReason && <Notice tone="unavailable" title="The model refused this run">{blockedReason}</Notice>}
-        {error && <Notice tone="danger" title="Check the inputs">{error}</Notice>}
-        {locationNote && <Notice tone="info" title="Location">{locationNote}</Notice>}
-
         <div className="prediction-layout">
           <form className="form-panel" onSubmit={runPrediction} noValidate>
             <fieldset disabled={pending}>
               <div className="panel-heading"><div><p className="eyebrow">Inputs</p><h2>Baseline and horizon</h2></div></div>
 
+              {!clientMode && <fieldset className="baseline-options">
+                <legend>Where the baseline cover comes from</legend>
+                <p className="form-hint">
+                  The paper prints several different figures for {STUDY_AREA.label} in 2006, so none is selected for
+                  you. Choose the one you are reproducing, or enter your own survey.
+                </p>
+                {PAPER_BASELINE_OPTIONS.map((option) => (
+                  <label key={option.id} className="radio-field" htmlFor={`baseline-${option.id}`}>
+                    <input
+                      id={`baseline-${option.id}`}
+                      type="radio"
+                      name="baselineOption"
+                      value={option.id}
+                      checked={form.baselineOptionId === option.id}
+                      onChange={() => setForm((current) => applyBaselineOption(current, option))}
+                    />
+                    <span>
+                      <span className="radio-label">
+                        {option.label} &mdash; {option.coverPercent}% in {option.year}
+                      </span>
+                      {option.conflict && <span className="conflict-tag">conflicts with the other tables</span>}
+                      <span className="form-hint">{option.note}</span>
+                    </span>
+                  </label>
+                ))}
+                <label className="radio-field" htmlFor={`baseline-${OWN_SURVEY}`}>
+                  <input
+                    id={`baseline-${OWN_SURVEY}`}
+                    type="radio"
+                    name="baselineOption"
+                    value={OWN_SURVEY}
+                    checked={form.baselineOptionId === OWN_SURVEY}
+                    onChange={() => setForm((current) => applyBaselineOption(current, null))}
+                  />
+                  <span>
+                    <span className="radio-label">My own survey</span>
+                    <span className="form-hint">Enter the cover, year, and citation yourself.</span>
+                  </span>
+                </label>
+              </fieldset>}
+
+              {selectedBaseline && (
+                <p className="form-hint form-hint-spaced">
+                  Cited as <strong>{selectedBaseline.source}</strong>. The cover, year, and source stay locked to that
+                  citation so the number cannot drift from its source. Choose &ldquo;My own survey&rdquo; to change them.
+                </p>
+              )}
+
               <label htmlFor="coverPercent">
-                Baseline live coral cover (%)
+                Initial live coral cover (%)
                 <input id="coverPercent" type="number" min="0" max="100" step="0.01" value={form.coverPercent}
+                  readOnly={clientMode || selectedBaseline !== null} className={clientMode || selectedBaseline ? 'input-locked' : undefined}
                   onChange={(event) => update('coverPercent', event.target.value)} required />
               </label>
-              <p className="form-hint form-hint-spaced">Enter a dated citywide source. The paper reports conflicting baseline values, so none is selected as fact.</p>
 
-              <div className="settings-grid">
-                <label htmlFor="baselineYear">
-                  Baseline year
-                  <input id="baselineYear" type="number" min="1900" max="2100" step="1" value={form.baselineYear}
-                    onChange={(event) => update('baselineYear', event.target.value)} required />
+              <div className="settings-grid prediction-window-fields">
+                <label htmlFor="predictionStartDate">Initial coral-cover year
+                  <input id="predictionStartDate" type="date" value={`${form.baselineYear}-01-01`}
+                    min="1900-01-01" max="2100-12-31" onChange={(event) => updateClientDate('startDate', event.target.value)} aria-describedby="prediction-window-note" />
                 </label>
-                <label htmlFor="horizonYears">
-                  Years to project
-                  <input id="horizonYears" type="number" min="1" max="100" step="1" value={form.horizonYears}
-                    onChange={(event) => update('horizonYears', event.target.value)} required />
+                <label htmlFor="predictionEndDate">Forecast ending year
+                  <input id="predictionEndDate" type="date" value={`${form.forecastEndYear ?? Number(form.baselineYear) + Number(form.horizonYears)}-12-31`}
+                    min={`${Number(form.baselineYear) + 1}-01-01`} max="2100-12-31"
+                    onChange={(event) => updateClientDate('endDate', event.target.value)} aria-describedby="prediction-window-note" />
                 </label>
+                <p id="prediction-window-note" className="form-hint">Initial live coral cover is measured at the selected start year. Future years are mathematical model projections and do not require observed dataset rows.</p>
               </div>
+              {false && <div className="prediction-window-summary" aria-live="polite">
+                <strong>Forecast duration:</strong> {form.horizonYears} years ({form.baselineYear}–{form.forecastEndYear ?? Number(form.baselineYear) + Number(form.horizonYears)})
+              </div>}
+              {false && <p className="form-hint form-hint-spaced">
+                The paper projects to 2036, which is 30 years from its 2006 baseline. Shorter horizons land inside the
+                figures the paper reports for 2016.
+              </p>}
 
               <label htmlFor="surveySource">
                 Baseline source
                 <input id="surveySource" type="text" maxLength={400} placeholder="Survey or report, citywide, with year"
+                  readOnly={clientMode || selectedBaseline !== null} className={clientMode || selectedBaseline ? 'input-locked' : undefined}
                   value={form.surveySource} onChange={(event) => update('surveySource', event.target.value)} required />
               </label>
-              <p className="form-hint">
+              <label htmlFor="surveyMethod">
+                Baseline survey method
+                <input id="surveyMethod" type="text" maxLength={300} placeholder="Describe how live cover was measured"
+                  value={form.surveyMethod} onChange={(event) => update('surveyMethod', event.target.value)} />
+              </label>
+              {false && <p className="form-hint">
                 Reef-site surveys are not interchangeable with the citywide scope. Confirm the scope matches before saving.
-              </p>
+              </p>}
 
-              <label htmlFor="profile">
+              {!clientMode && <label htmlFor="profile">
                 Run mode
-                <select id="profile" value={form.profile} onChange={(event) => update('profile', event.target.value as FormState['profile'])}>
+                <select id="profile" value={form.profile} onChange={(event) => {
+                  const profile = event.target.value as FormState['profile'];
+                  setForm((current) => profile === 'paper-reproduction'
+                    ? { ...current, profile, baselineYear: '2006', coverPercent: '57', startDate: '2006-01-01', forecastEndYear: current.forecastEndYear || '2036', horizonYears: String(Number(current.forecastEndYear || '2036') - 2006), surveySource: current.surveySource || PAPER_REPRODUCTION_BASELINE_SOURCE('2006'), surveyMethod: current.surveyMethod || PAPER_REPRODUCTION_BASELINE_METHOD }
+                    : { ...current, profile });
+                }}>
                   <option value="paper">Paper profile</option>
                   <option value="scenario">Scenario</option>
+                  <option value="paper-reproduction">Paper reproduction</option>
                   <option value="demo" disabled={!demoAllowed}>Demo</option>
                 </select>
-              </label>
+              </label>}
+
+              {false && <div className="prediction-input-summary" aria-live="polite">
+                <strong>Prediction summary</strong>
+                <span>Profile: {form.profile === 'paper-reproduction' ? 'Paper reproduction' : form.profile}</span>
+                <span>Initial year: {form.baselineYear}</span>
+                <span>Initial live coral cover: {form.coverPercent || '—'}%</span>
+                <span>Forecast ending year: {form.forecastEndYear ?? Number(form.baselineYear) + Number(form.horizonYears)}</span>
+                <span>Forecast duration: {form.horizonYears} years</span>
+              </div>}
+
+              {false && form.profile === 'paper-reproduction' && (
+                <Notice tone="warning" title="Paper-reproduction configuration">
+                  <p><strong>Paper-reproduction baseline: 2006, 57% live coral cover.</strong></p>
+                  <p>{PAPER_REPRODUCTION_LABEL}</p>
+                  <p>C0: 57% in 2006 · alpha: 0.05 per °C per year · K: 70 provisional · beta: 5.6743e-8 provisional/inferred.</p>
+                  <p>Tourism growth: {PAPER_REPRODUCTION_TOURISM_PERIODS.map((period) => `${period.startYear}-${period.endYear}: ${period.growthRate}`).join(' · ')} per year.</p>
+                  <p>The paper also reports conflicting baseline values of 57.25% and 45.83%; they are retained as a warning and are not used by this profile.</p>
+                </Notice>
+              )}
 
               {form.profile === 'scenario' && (
                 <>
@@ -316,7 +538,7 @@ export function PredictPage(): JSX.Element {
                       validated prediction counts, and labelled in any report that includes it.
                     </p>
                   </Notice>
-                  {ASSUMABLE_KEYS.map((candidate) => {
+                  {ASSUMABLE_KEYS.filter((candidate) => form.profile === 'scenario' || candidate.key === 'alpha').map((candidate) => {
                     const draft = assumptionDrafts(form)[candidate.key];
                     const problem = assumptionErrors[candidate.key];
                     const isMissing = missingKeys.includes(candidate.key);
@@ -385,6 +607,8 @@ export function PredictPage(): JSX.Element {
                     ? 'Run Demo Prediction'
                     : form.profile === 'scenario'
                       ? 'Run Scenario'
+                      : form.profile === 'paper-reproduction'
+                        ? 'Run Paper Reproduction'
                       : 'Run prediction'}
               </button>
             </fieldset>
@@ -392,8 +616,23 @@ export function PredictPage(): JSX.Element {
 
           <section className="result-panel">
             <div className="panel-heading"><div><p className="eyebrow">Result</p><h2>Projection</h2></div></div>
+            <div className="prediction-result-scroll">
+            {blockedReason && !result && (
+              <Notice tone="unavailable" title="The model refused this run">
+                <p>{blockedReason}</p>
+                {blockedKeys.length > 0 && form.profile !== 'scenario' && (
+                  <>
+                    <p>{blockedKeys.join(' and ')} {blockedKeys.length === 1 ? 'is' : 'are'} not specified in the published paper, so this run cannot be completed until a researcher supplies a cited value.</p>
+                    <button type="button" className="text-button" onClick={switchToScenario}>Run this as a scenario</button>
+                  </>
+                )}
+              </Notice>
+            )}
+            {error && !result && <Notice tone="danger" title="Prediction not completed">{error}<p className="form-hint">This attempt was saved to your prediction history.</p></Notice>}
+            {locationNote && <Notice tone="info" title="Location">{locationNote}</Notice>}
             {!result && <p className="muted">Run the model to see the annual prediction table.</p>}
-            {result && (
+            {result?.status === 'unavailable' && <Notice tone="danger" title="Run not completed">{result.failureReason ?? 'The model did not produce an output.'}<p className="form-hint">This attempt is saved in history for traceability.</p></Notice>}
+            {result && result.status !== 'unavailable' && (
               <>
                 <div className="card-kicker">
                   <span>{result.targetMeasure}</span>
@@ -404,23 +643,30 @@ export function PredictPage(): JSX.Element {
                       : <ConditionBadge label="Model projection" status="good" />}
                 </div>
                 {result.isScenario && <Notice tone="unavailable" title={SCENARIO_LABEL}>{result.warnings[0] ?? SCENARIO_DISCLAIMER}</Notice>}
-                <p className="prediction-number">{result.finalCoverPercent.toFixed(2)}%</p>
-                <p className="muted">
-                  From {result.initialCoverPercent.toFixed(2)}% in {result.baselineYear} to the end of {result.baselineYear + result.horizonYears}
-                  {' '}({(result.finalCoverPercent - result.initialCoverPercent).toFixed(2)} percentage points).
-                </p>
+                <div className="result-summary">
+                  <div className="result-final-cover">
+                    <span className="metric-label">Final annual average cover</span>
+                    <strong className="prediction-number">{result.finalCoverPercent.toFixed(2)}%</strong>
+                    <span className="muted">{(result.finalCoverPercent - result.initialCoverPercent).toFixed(2)} percentage points from baseline</span>
+                  </div>
+                  <dl className="result-meta">
+                    <div><dt>Baseline</dt><dd>{result.initialCoverPercent.toFixed(2)}% · {result.baselineYear}</dd></div>
+                    <div><dt>End year</dt><dd>{result.baselineYear + result.horizonYears}</dd></div>
+                    <div><dt>Scope</dt><dd>Citywide annual average</dd></div>
+                  </dl>
+                </div>
                 <div className="prediction-table-heading">
                   <div><p className="eyebrow">Annual output</p><h3>Prediction table</h3></div>
                   <span className="muted">End-of-year states and interval means</span>
                 </div>
-                <AnnualTable annual={result.annual} />
-                <WarningList warnings={result.warnings} />
+                <AnnualTable annual={result.annual} endpointsOnly />
                 <div className="button-row">
                   <Link className="button button-small button-secondary" to={`/history?prediction=${result.predictionId}`}>Open in history</Link>
-                  <a className="button button-small button-secondary" href={`/api/v1/predictions/${result.predictionId}/download?format=markdown`}>Download report</a>
+                  <a className="button button-small button-secondary" href={`/api/v1/predictions/${result.predictionId}/download?format=pdf`}>Download PDF</a>
                 </div>
               </>
             )}
+            </div>
           </section>
         </div>
       </div>

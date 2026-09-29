@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {
   AI_NOT_CONFIGURED,
+  PAPER_REPRODUCTION_LABEL,
   SCENARIO_LABEL,
   STUDY_AREA,
   type AiCitation,
@@ -16,6 +17,26 @@ import { readUploadText } from './uploads';
 
 const formatNumber = (value: number, digits = 2): string =>
   Number.isInteger(value) ? String(value) : value.toFixed(digits);
+const DEMO_LABEL = 'DEMO—synthetic, not a validated finding';
+
+/**
+ * Non-negotiable interpretation limits. These are appended by the server to
+ * every report, not merely requested in the provider prompt, so a provider that
+ * omits them cannot produce an unlabelled report.
+ */
+export const INTERPRETATION_LIMITS = [
+  'The thermal coefficient and tourism growth rate were not published in the paper; any configured value is recorded with its source dataset.',
+  'Temperature inputs must be sea-surface temperature. The paper rejects air temperature as a substitute.',
+  'Condition bands are an analyst convention over 0-100 percent, not a published classification.',
+  'The paper reports an MAE of 0.30 that this implementation cannot reconcile; treat fit quality as unverified.'
+];
+
+const limitationsSection = (): string[] => [
+  '## Interpretation limits',
+  '',
+  ...INTERPRETATION_LIMITS.map((line) => `- ${line}`),
+  ''
+];
 
 const percentChange = (from: number, to: number): string => {
   if (from === 0) return 'n/a';
@@ -53,6 +74,9 @@ export class AiReportService {
     for (const id of input.uploadIds) {
       const upload = await db.findUploadForUser(id, input.userId);
       if (!upload) throw notFound(`No upload with id ${id} belongs to this account`);
+      if (upload.extractionStatus !== 'text-available' || !upload.textPreview?.trim()) {
+        throw unprocessable('The selected document has no verified extracted text; OCR or a text-readable replacement is required');
+      }
       uploads.push(upload);
     }
     return { predictions, uploads };
@@ -112,6 +136,15 @@ export class AiReportService {
       );
       lines.push('');
     }
+    if (predictions.some((prediction) => prediction.isDemo)) {
+      lines.push(`- ${DEMO_LABEL}. Synthetic runs cannot be cited as research findings.`);
+      warnings.push(DEMO_LABEL);
+    }
+    if (predictions.some((prediction) => prediction.isPaperReproduction)) {
+      lines.push(`- ${PAPER_REPRODUCTION_LABEL}`);
+      lines.push('- Paper-reproduction uses alpha = 0.05, configured piecewise tourism growth, and C0 = 57% in 2006. K and beta are provisional/inferred; the paper also reports conflicting C0 values of 57.25% and 45.83%. This result is not 100% accurate and is not independently validated.');
+      warnings.push(PAPER_REPRODUCTION_LABEL);
+    }
 
     for (const prediction of predictions) {
       const endYear = prediction.baselineYear + prediction.horizonYears;
@@ -128,6 +161,9 @@ export class AiReportService {
       lines.push(`- Final interval mean: ${formatNumber(prediction.finalIntervalMeanPercent)}%`);
       lines.push(`- Condition at end state: ${prediction.stateClassification ?? 'unclassified'}`);
       lines.push(`- Created: ${prediction.createdAt}`);
+      lines.push('- Validation status: not independently validated.');
+      lines.push(`- Parameter status: ${prediction.parameters.map((parameter) => `${parameter.key}=${parameter.status}/${parameter.reviewStatus}`).join('; ')}`);
+      lines.push(`- Data provenance: ${prediction.sources.map((source) => `${source.name}: ${source.source}`).join('; ')}`);
       if (prediction.warnings.length > 0) {
         lines.push('- Warnings carried from the model run:');
         for (const warning of prediction.warnings) lines.push(`  - ${warning}`);
@@ -206,13 +242,7 @@ export class AiReportService {
       lines.push('');
     }
 
-    lines.push('## Interpretation limits');
-    lines.push('');
-    lines.push('- The thermal coefficient and tourism growth rate were not published in the paper; any configured value is recorded with its source dataset.');
-    lines.push('- Temperature inputs must be sea-surface temperature. The paper rejects air temperature as a substitute.');
-    lines.push('- Condition bands are an analyst convention over 0-100 percent, not a published classification.');
-    lines.push('- The paper reports an MAE of 0.30 that this implementation cannot reconcile; treat fit quality as unverified.');
-    lines.push('');
+    lines.push(...limitationsSection());
     lines.push(`_Generated ${new Date().toISOString()} by the deterministic summary generator._`);
 
     return { body: lines.join('\n'), citations, warnings };
@@ -241,6 +271,8 @@ export class AiReportService {
           'You write factual coral reef model reports.',
           'Use only the supplied model results and documents. Never invent data, sources, or parameter values.',
           `If any supplied run is a scenario, include the exact label "${SCENARIO_LABEL}" prominently and state that it is excluded from validated findings.`,
+          `If any supplied run is a demo, include the exact label "${DEMO_LABEL}" prominently. No supplied run has independent validation; never call it a validated finding.`,
+          `If any supplied run is paper-reproduction, include the exact label "${PAPER_REPRODUCTION_LABEL}" and state alpha = 0.05, configured piecewise tourism growth, C0 = 57% in 2006, provisional/inferred K and beta, conflicting paper C0 values, and that it is not independently validated or 100% accurate.`,
           'Always include the paper limitation that alpha and g were not published and that any configured value must be cited to its dataset.',
           'Return JSON with keys: body (markdown string), citations (array of {predictionId, uploadId, filename, page, excerpt}), warnings (array of strings).',
           'Every citation must reference a predictionId or uploadId supplied in the user message, and the excerpt must be copied from the supplied text or numbers.'
@@ -258,6 +290,7 @@ export class AiReportService {
             finalIntervalMeanPercent: prediction.finalIntervalMeanPercent,
             isDemo: prediction.isDemo,
             isScenario: prediction.isScenario,
+            isPaperReproduction: prediction.isPaperReproduction,
             assumptions: (prediction.assumptions ?? []).map((assumption) => ({
               key: assumption.key,
               value: assumption.value,
@@ -266,7 +299,10 @@ export class AiReportService {
               range: assumption.range
             })),
             modelConfigVersion: prediction.modelConfigVersion,
-            warnings: prediction.warnings
+            warnings: prediction.warnings,
+            parameters: prediction.parameters.map((parameter) => ({ key: parameter.key, status: parameter.status, reviewStatus: parameter.reviewStatus, provenance: parameter.provenance })),
+            sources: prediction.sources,
+            validationStatus: 'not independently validated'
           })),
           '',
           documents.length > 0 ? 'Documents:' : '',
@@ -294,9 +330,29 @@ export class AiReportService {
         warnings.unshift(`${SCENARIO_LABEL}: scenario results are excluded from validated findings.`);
       }
     }
+    if (predictions.some((prediction) => prediction.isDemo)) {
+      if (!body.includes(DEMO_LABEL)) body = `**${DEMO_LABEL}**\n\n${body}`;
+      if (!warnings.some((warning) => warning.includes(DEMO_LABEL))) warnings.unshift(DEMO_LABEL);
+    }
+    if (predictions.some((prediction) => prediction.isPaperReproduction)) {
+      if (!body.includes(PAPER_REPRODUCTION_LABEL)) body = `**${PAPER_REPRODUCTION_LABEL}**\n\n${body}`;
+      if (!warnings.some((warning) => warning.includes(PAPER_REPRODUCTION_LABEL))) warnings.unshift(PAPER_REPRODUCTION_LABEL);
+    }
 
     if (input.question && !aiClient.configured) {
       warnings.push('Your question was recorded but not answered because no AI provider is configured on this environment.');
+    }
+
+    // A provider is not trusted to volunteer its own limitations. Re-attach the
+    // server-owned limits block so an AI report can never be less caveated than
+    // the deterministic summary, and flag it when the model already wrote one.
+    if (generatedBy === 'ai-provider') {
+      if (body.includes('## Interpretation limits')) {
+        warnings.push(
+          `The provider wrote its own interpretation-limits section. The mandatory server limits are: ${INTERPRETATION_LIMITS.join(' ')}`
+        );
+      }
+      body = `${body.trimEnd()}\n\n${limitationsSection().join('\n')}`;
     }
 
     const id = crypto.randomUUID();
@@ -316,6 +372,10 @@ export class AiReportService {
       warnings,
       createdAt: new Date().toISOString()
     };
+    // A report is a snapshot of the selected prediction history. Replacing a
+    // report for the same prediction prevents stale interpretations from
+    // appearing current after that run is selected again.
+    await db.invalidateAiReportsForPredictions(input.userId, predictions.map((prediction) => prediction.id));
     await db.createAiReport(record);
     logger.info('Created an AI report', { reportId: record.id, kind, generatedBy, predictions: predictions.length, uploads: uploads.length });
     const { _id, userId, ...report } = record;

@@ -68,6 +68,18 @@ export const sendPasswordResetEmail = (email: string, resetUrl: string): Promise
     ].join('\n')
   });
 
+export const sendLoginOtpEmail = (email: string, code: string): Promise<MailDelivery> =>
+  send({
+    to: email,
+    subject: 'Your CCOverT login code',
+    text: [
+      `Your CCOverT login code is: ${code}`,
+      '',
+      'This code expires in 10 minutes and can be used once.',
+      'If you did not request this code, you can ignore this message.'
+    ].join('\n')
+  });
+
 /** Best-effort notification: never fails the user-facing action. */
 export const notifySilently = async (label: string, task: () => Promise<unknown>): Promise<void> => {
   try {

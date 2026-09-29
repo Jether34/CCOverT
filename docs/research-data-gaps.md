@@ -21,10 +21,13 @@ This register is part of the product boundary. A demo or exploratory scenario ma
 
 - A documented SST provider or CSV import for Puerto Princesa City, with annual coverage, units in degrees Celsius, spatial scope, retrieval/import date, and a clear statement that it is SST rather than air temperature.
 - A documented annual tourist-arrivals provider or CSV import for Puerto Princesa City. Reef-site visitor counts and generic tourism indicators are not interchangeable with citywide annual arrivals.
-- A reviewed citywide coral-cover baseline source for each run. The source citation must include the source year and the researcher’s scope confirmation.
+- A reviewed citywide coral-cover baseline source for each run. The source citation must include the source year and the researcher’s scope confirmation. The Predict page offers the figures the paper actually prints as an explicit choice (`PAPER_BASELINE_OPTIONS`), so the conflict is visible instead of being resolved by a hidden default. Cover, year, and citation are filled together and held locked to one another so a value cannot drift from the table it came from, and every option ships a citation the API accepts without the user retyping the year. Choosing "My own survey" clears them for an analyst-supplied figure. Whatever is selected is stored in the run's `sources` entry.
 - Provenance links for any fitted `g`, including the exact dataset version and the log-linear estimation method used by the import workflow.
 
 ## Product and configuration gaps
+
+- The runnable `paper-reproduction` profile is versioned as `paper-reproduction-1.0.0` and uses alpha `0.05`, C0 `57%` in 2006, and the continuous `piecewise-tourism-1.0.0` schedule (2006-2016: `0.213314`; 2017-2022: `0`; 2023 onward: `0.128708`). It is an auditable reproduction configuration, not a validated paper profile. K and beta remain provisional/inferred, and the conflicting paper baselines remain visible.
+- The piecewise schedule is a configured reproduction input. A researcher still needs to attach and review authoritative SST and citywide tourism datasets before any result can be called research-ready; attached datasets are retained as provenance and do not silently replace the confirmed reproduction constants.
 
 - The paper profile remains not configured until `alpha`, `g`, SST provenance, tourism scope, and the required reviewed inputs are resolved.
 - Demo values for `alpha` and `g` are synthetic development values only and must remain excluded from validated accuracy reporting.

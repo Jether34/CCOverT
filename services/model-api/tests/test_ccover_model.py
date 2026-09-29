@@ -36,6 +36,7 @@ from ccover_model.parameters import (  # noqa: E402
     REQUIRED_PARAMETER_KEYS,
     STATUS_PROVISIONAL,
     STATUS_UNSPECIFIED,
+    PAPER_REPRODUCTION_TOURISM_PERIODS,
 )
 
 COMPLETE_PARAMETERS: dict[str, float] = {
@@ -96,6 +97,70 @@ def model_request(**overrides) -> dict:
 
 
 class DriverTests(unittest.TestCase):
+    def test_piecewise_tourism_is_continuous_and_uses_periods(self) -> None:
+        parameters = ModelParameters.from_mapping({
+            **COMPLETE_PARAMETERS,
+            "tourismGrowthPeriods": list(PAPER_REPRODUCTION_TOURISM_PERIODS),
+        })
+        self.assertEqual(parameters.baseline_year, 2006)
+        self.assertAlmostEqual(parameters.temperature(0.0), 30.19, places=12)
+        self.assertAlmostEqual(parameters.tourism(0.0), 147806.0, places=6)
+        first_end = 147806.0 * math.exp(0.213314 * 11)
+        self.assertAlmostEqual(parameters.tourism(11.0), first_end, places=4)
+        self.assertAlmostEqual(parameters.tourism(11.000001), first_end, places=2)
+        self.assertAlmostEqual(parameters.tourism_growth_rate(10.0), 0.213314, places=6)
+        self.assertEqual(parameters.tourism_growth_rate(11.0), 0.0)
+        self.assertEqual(parameters.tourism_growth_rate(17.0), 0.128708)
+        self.assertEqual(parameters.tourism_growth_rate(21.0), 0.128708)
+
+    def test_paper_reproduction_supports_forecast_end_years_2026_2030_and_2036(self) -> None:
+        parameters = ModelParameters.from_mapping({
+            **COMPLETE_PARAMETERS,
+            "tourismGrowthPeriods": list(PAPER_REPRODUCTION_TOURISM_PERIODS),
+        })
+        for end_year in (2026, 2030, 2036):
+            result = simulate(parameters, initial_cover_percent=57.0, horizon_years=end_year - 2006)
+            self.assertEqual(result.annual[-1].year, end_year)
+            self.assertGreater(result.annual[-1].tourism_end_arrivals, result.annual[-1].tourism_start_arrivals)
+            self.assertAlmostEqual(result.annual[-1].tourism_growth_rate, 0.128708, places=6)
+        # After 2026, the model grows the continuous value; it does not reuse
+        # the 2026 observation or reset to V0.
+        self.assertGreater(parameters.tourism(30.0), parameters.tourism(20.0))
+
+    def test_piecewise_periods_reject_overlap_and_gaps(self) -> None:
+        with self.assertRaises(ModelValidationError):
+            ModelParameters.from_mapping({
+                **COMPLETE_PARAMETERS,
+                "tourismGrowthPeriods": [
+                    {"startYear": 2006, "endYear": 2016, "growthRate": 0.1},
+                    {"startYear": 2018, "endYear": 2020, "growthRate": 0.1},
+                ],
+            })
+
+    def test_paper_reproduction_response_echoes_periods_and_label_warning(self) -> None:
+        body = model_request(
+            profile="paper-reproduction",
+            modelConfigVersion="paper-reproduction-1.0.0",
+            tourismGrowthPeriods=list(PAPER_REPRODUCTION_TOURISM_PERIODS),
+            parameters={
+                key: {
+                    "value": value,
+                    "unit": "unit",
+                    "status": "paper-stated",
+                    "provenance": "confirmed fixture",
+                    "reviewStatus": "unreviewed",
+                }
+                for key, value in COMPLETE_PARAMETERS.items()
+                if key != "baselineYear"
+            },
+        )
+        response = TestClient(app).post("/model/predict", json=body, headers={"x-service-token": "test-token"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["isPaperReproduction"])
+        self.assertEqual(payload["tourismGrowthPeriods"][1]["growthRate"], 0.0)
+        self.assertTrue(any("Independent scientific validation is pending" in warning for warning in payload["warnings"]))
+
     def test_temperature_and_tourism_drivers_match_the_equation(self) -> None:
         parameters = ModelParameters.from_mapping(COMPLETE_PARAMETERS)
         for t in (0.0, 5.5, 20.0):
@@ -263,6 +328,26 @@ class ModelBoundaryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["unconfiguredParameters"], ["alpha", "g"])
 
+    def test_paper_reproduction_profile_is_distinct_and_inactive_alpha_is_explicit(self) -> None:
+        body = model_request(profile="paper-reproduction", horizonYears=1)
+        body["parameters"]["alpha"]["value"] = None
+        body["parameters"]["alpha"]["status"] = "inactive-for-horizon"
+        # With the listed T0/gamma/Tcrit values, one year remains below Tcrit.
+        response = self.client.post("/model/predict", json=body)
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertEqual(result["profile"], "paper-reproduction")
+        self.assertFalse(result["isDemo"])
+        self.assertFalse(result["isScenario"])
+        self.assertTrue(any("Alpha was not numerically required" in warning for warning in result["warnings"]))
+
+    def test_paper_reproduction_requires_alpha_after_thermal_crossing(self) -> None:
+        body = model_request(profile="paper-reproduction", horizonYears=100)
+        body["parameters"]["alpha"]["value"] = None
+        response = self.client.post("/model/predict", json=body)
+        self.assertIn(response.status_code, (409, 422))
+        self.assertIn('alpha', json.dumps(response.json()).lower())
+
     def test_model_metadata_exposes_the_equation_and_provenance(self) -> None:
         response = self.client.get("/model/metadata")
         self.assertEqual(response.status_code, 200)
@@ -274,6 +359,118 @@ class ModelBoundaryTests(unittest.TestCase):
         self.assertEqual(statuses["alpha"], STATUS_UNSPECIFIED)
         self.assertEqual(statuses["g"], STATUS_UNSPECIFIED)
         self.assertEqual(body["provisionalParameters"], ["K", "beta"])
+
+    def test_validation_endpoint_reports_holdout_metrics_and_never_validates(self) -> None:
+        # gamma is chosen so the SST driver crosses Tcrit inside the training
+        # window; otherwise alpha is unidentifiable and the fit must refuse.
+        values = {**COMPLETE_PARAMETERS, "T0": 29.0, "gamma": 0.5, "Tcrit": 30.0, "V0": 100000.0}
+        reference = ModelParameters.from_mapping({**values, "baselineYear": 2006})
+        cover = [(2006, 55.0)] + [
+            (point.year, point.cover_end_percent) for point in simulate(reference, 55.0, 8).annual
+        ]
+        arrivals = [(year, reference.tourism(year - 2006)) for year in range(2006, 2015)]
+        response = self.client.post("/model/validate", json={
+            "studyAreaId": "puerto-princesa-city",
+            "baselineYear": 2006,
+            "parameters": {
+                key: {"value": value, "unit": "unit", "status": "reported", "provenance": "Test fixture", "reviewStatus": "reviewed"}
+                for key, value in values.items() if key != "baselineYear"
+            },
+            "coralCover": {"label": "Citywide %LCC survey series", "points": [[year, value] for year, value in cover]},
+            "tourism": {"label": "Citywide annual arrivals", "points": [[year, value] for year, value in arrivals]},
+            "trainEndYear": 2012,
+            "trainingDatasetVersion": "training-v1",
+            "validationDatasetVersion": "validation-v1",
+            "bootstrapSamples": 5,
+            "seed": 3,
+        })
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["holdout"]["holdoutYears"], [2013, 2014])
+        self.assertIn("historicalMean", body["holdout"]["baselines"])
+        self.assertIn("rollingOriginTrainingOnly", body["holdout"])
+        self.assertEqual(len(body["fitting"]["bootstrap95PercentIntervals"]["alpha"]), 2)
+        self.assertEqual(body["fitting"]["trainThroughYear"], 2012)
+        self.assertEqual(body["dataProvenance"]["trainingDatasetVersion"], "training-v1")
+        self.assertIn("nothing is marked validated", body["status"])
+        joined = " ".join(body["warnings"])
+        self.assertIn("not paper values", joined)
+        self.assertIn("Adopting one requires a new reviewed model configuration version", joined)
+
+    def test_validation_endpoint_refuses_to_fit_an_unidentifiable_alpha(self) -> None:
+        # The default fixture never crosses Tcrit, so alpha cannot be estimated.
+        values = {**COMPLETE_PARAMETERS, "T0": 29.0, "gamma": 0.01, "Tcrit": 31.0}
+        reference = ModelParameters.from_mapping({**values, "baselineYear": 2006})
+        cover = [(2006, 55.0)] + [
+            (point.year, point.cover_end_percent) for point in simulate(reference, 55.0, 8).annual
+        ]
+        arrivals = [(year, reference.tourism(year - 2006)) for year in range(2006, 2015)]
+        response = self.client.post("/model/validate", json={
+            "baselineYear": 2006,
+            "parameters": {
+                key: {"value": value, "unit": "unit", "status": "reported", "provenance": "Test fixture", "reviewStatus": "reviewed"}
+                for key, value in values.items() if key != "baselineYear"
+            },
+            "coralCover": {"label": "Cover", "points": [[year, value] for year, value in cover]},
+            "tourism": {"label": "Arrivals", "points": [[year, value] for year, value in arrivals]},
+            "trainEndYear": 2012,
+            "trainingDatasetVersion": "training-v1",
+            "validationDatasetVersion": "validation-v1",
+            "bootstrapSamples": 5,
+        })
+        self.assertNotEqual(response.status_code, 200)
+        self.assertIn("alpha cannot be identified", json.dumps(response.json()))
+
+    def test_validation_endpoint_refuses_a_missing_parameter(self) -> None:
+        response = self.client.post("/model/validate", json={
+            "baselineYear": 2006,
+            "parameters": {
+                key: {"value": value, "unit": "unit", "status": "reported", "provenance": "Test fixture", "reviewStatus": "reviewed"}
+                for key, value in COMPLETE_PARAMETERS.items() if key not in ("baselineYear", "alpha")
+            },
+            "coralCover": {"label": "Cover", "points": [[2006, 55.0], [2007, 55.1], [2008, 55.2], [2009, 55.0], [2010, 54.6], [2011, 54.0], [2012, 53.4], [2013, 52.9], [2014, 52.4]]},
+            "tourism": {"label": "Arrivals", "points": [[year, 100000 * 1.02 ** (year - 2006)] for year in range(2006, 2015)]},
+            "trainEndYear": 2012,
+            "trainingDatasetVersion": "training-v1",
+            "validationDatasetVersion": "validation-v1",
+        })
+        self.assertNotEqual(response.status_code, 200)
+        self.assertEqual(response.json()["error"]["code"], "MODEL_PARAMETERS_NOT_CONFIGURED")
+        self.assertEqual(response.json()["error"]["details"]["missing"][0]["key"], "alpha")
+
+    def test_validation_endpoint_requires_the_service_token(self) -> None:
+        original = os.environ.get("MODEL_SERVICE_TOKEN")
+        os.environ["MODEL_SERVICE_TOKEN"] = "test-token-0123456789abcdef"
+        try:
+            import importlib
+
+            from ccover_model import api as api_module
+
+            reloaded = importlib.reload(api_module)
+            client = TestClient(reloaded.app)
+            response = client.post("/model/validate", json={
+                "baselineYear": 2006,
+                "parameters": {
+                    key: {"value": value, "unit": "unit", "status": "reported", "provenance": "Test fixture", "reviewStatus": "reviewed"}
+                    for key, value in COMPLETE_PARAMETERS.items() if key != "baselineYear"
+                },
+                "coralCover": {"label": "Cover", "points": [[2006, 55.0], [2007, 55.1], [2008, 55.2], [2009, 55.0], [2010, 54.6], [2011, 54.0], [2012, 53.4], [2013, 52.9], [2014, 52.4]]},
+                "tourism": {"label": "Arrivals", "points": [[year, 100000 * 1.02 ** (year - 2006)] for year in range(2006, 2015)]},
+                "trainEndYear": 2012,
+                "trainingDatasetVersion": "training-v1",
+                "validationDatasetVersion": "validation-v1",
+            })
+            self.assertEqual(response.status_code, 401)
+        finally:
+            if original is None:
+                os.environ.pop("MODEL_SERVICE_TOKEN", None)
+            else:
+                os.environ["MODEL_SERVICE_TOKEN"] = original
+            import importlib
+
+            from ccover_model import api as api_module
+
+            importlib.reload(api_module)
 
     def test_prediction_without_alpha_and_g_never_returns_an_estimate(self) -> None:
         body = model_request()

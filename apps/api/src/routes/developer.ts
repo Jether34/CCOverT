@@ -1,8 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { gzipSync } from 'node:zlib';
 import mongoose from 'mongoose';
-import { EJSON } from 'bson';
 import { Router } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
@@ -15,6 +13,7 @@ import { listActivity, recordActivity } from '../services/activity';
 import { modelConfigService } from '../services/modelConfigService';
 import { encryptSmtpPassword, publicSmtp } from '../services/smtpSettings';
 import { emailSchema, passwordSchema } from '../utils/validation';
+import { createBackupArchive, verifyBackupArchive } from '../services/backupArchive';
 
 const backupDirectory = path.resolve(process.env.BACKUP_DIR ?? path.join(process.cwd(), 'backups'));
 const safeUser = (user: Awaited<ReturnType<Database['findUserById']>>) => user && ({
@@ -27,7 +26,11 @@ export function createDeveloperRouter(database: Database): Router {
   const { requireAuth, requireRole } = createAuthMiddleware(database);
 
   router.get('/config', requireAuth, asyncHandler(async (_request, response) => {
-    response.json({ config: await database.getSystemSetting() });
+    // This endpoint is consumed by the shared app shell. Expose only the
+    // developer-authored announcement; SMTP/system configuration stays admin-only
+    // behind /developer/status.
+    const setting = await database.getSystemSetting();
+    response.json({ config: { announcement: setting.announcement } });
   }));
 
   router.get('/status', requireRole('admin'), asyncHandler(async (_request, response) => {
@@ -70,7 +73,7 @@ export function createDeveloperRouter(database: Database): Router {
   }));
 
   router.patch('/users/:id', requireRole('admin'), sameOriginMiddleware, asyncHandler(async (request, response) => {
-    const input = z.object({ role: z.enum(['user', 'researcher', 'admin']).optional(), disabled: z.boolean().optional() }).parse(request.body);
+    const input = z.object({ role: z.enum(['client', 'user', 'researcher', 'admin']).optional(), disabled: z.boolean().optional() }).parse(request.body);
     const target = await database.findUserById(String(request.params.id));
     if (!target) throw notFound('User not found');
     if (target.id === request.user!.id && (input.disabled || input.role && input.role !== 'admin')) throw forbidden('You cannot remove your own developer access');
@@ -83,7 +86,7 @@ export function createDeveloperRouter(database: Database): Router {
   }));
 
   router.post('/users', requireRole('admin'), sameOriginMiddleware, asyncHandler(async (request, response) => {
-    const input = z.object({ email: emailSchema, password: passwordSchema, role: z.enum(['user', 'researcher', 'admin']) }).parse(request.body);
+    const input = z.object({ email: emailSchema, password: passwordSchema, role: z.enum(['client', 'researcher', 'admin']) }).parse(request.body);
     if (await database.findUserByEmail(input.email)) throw conflict('An account with that email already exists');
     const user = await database.createUser({ email: input.email, passwordHash: await bcrypt.hash(input.password, 12), emailVerified: true, role: input.role });
     recordActivity({ kind: 'change', action: `Created ${input.role} account ${input.email}`, actorId: request.user!.id });
@@ -100,9 +103,20 @@ export function createDeveloperRouter(database: Database): Router {
     const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '');
     const filename = `ccover-backup-${timestamp}.json.gz`;
     await fs.mkdir(backupDirectory, { recursive: true });
-    await fs.writeFile(path.join(backupDirectory, filename), gzipSync(EJSON.stringify({ createdAt: new Date(), collections: snapshot })), { flag: 'wx', mode: 0o600 });
+    const archive = createBackupArchive({ createdAt: new Date(), collections: snapshot });
+    verifyBackupArchive(archive);
+    await fs.writeFile(path.join(backupDirectory, filename), archive, { flag: 'wx', mode: 0o600 });
     recordActivity({ kind: 'change', action: `Created database backup ${filename}`, actorId: request.user!.id });
     response.status(201).json({ filename });
+  }));
+
+  router.post('/backups/:filename/verify', requireRole('admin'), sameOriginMiddleware, asyncHandler(async (request, response) => {
+    const filename = String(request.params.filename);
+    if (!/^ccover-backup-\d{8}T\d{6}\.json\.gz$/.test(filename)) throw badRequest('Invalid backup filename');
+    const bytes = await fs.readFile(path.join(backupDirectory, filename)).catch(() => { throw notFound('Backup archive not found'); });
+    const result = verifyBackupArchive(bytes);
+    recordActivity({ kind: 'change', action: `Verified backup archive ${filename}`, actorId: request.user!.id });
+    response.json({ filename, ...result, restoreDrillCompleted: false });
   }));
 
   return router;

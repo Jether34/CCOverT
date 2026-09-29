@@ -19,7 +19,30 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_dotenv(path: Path) -> None:
+    """
+    The stack reads `.env` via uvicorn's --env-file, so the token this check needs
+    exists there but not in the shell that runs it. Without this the request goes
+    out unauthenticated and the check fails on a 401 that says nothing about the
+    contract it is meant to verify.
+    """
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_dotenv(REPO_ROOT / ".env")
 
 MODEL_URL = os.environ.get("MODEL_SERVICE_URL", "http://127.0.0.1:8000").rstrip("/")
 TOKEN = os.environ.get("MODEL_SERVICE_TOKEN", "")

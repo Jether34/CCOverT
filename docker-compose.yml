@@ -20,7 +20,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       MODEL_SERVICE_TOKEN: ${MODEL_SERVICE_TOKEN:?MODEL_SERVICE_TOKEN must be set}
-      MODEL_ALLOW_DEMO_PROFILE: ${MODEL_ALLOW_DEMO_PROFILE:-true}
+      MODEL_ALLOW_DEMO_PROFILE: ${MODEL_ALLOW_DEMO_PROFILE:-false}
     expose:
       - "8000"
     networks:
@@ -54,8 +54,8 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: "4000"
-      WEB_ORIGIN: ${DOCKER_WEB_ORIGIN:-http://localhost:8080}
-      APP_URL: ${DOCKER_APP_URL:-http://localhost:8080}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
+      APP_URL: ${APP_URL:-http://localhost:5173}
       MONGODB_URI: mongodb://mongo:27017/ccover_t
       USE_MEMORY_DB: "false"
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
@@ -70,8 +70,11 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       MODEL_SERVICE_URL: http://model:8000
       MODEL_SERVICE_TOKEN: ${MODEL_SERVICE_TOKEN:?MODEL_SERVICE_TOKEN must be set}
-      ALLOW_DEMO_PROFILE: ${ALLOW_DEMO_PROFILE:-true}
-      MODEL_ALLOW_DEMO_PROFILE: ${ALLOW_DEMO_PROFILE:-true}
+      ALLOW_DEMO_PROFILE: ${ALLOW_DEMO_PROFILE:-false}
+      MODEL_ALLOW_DEMO_PROFILE: ${MODEL_ALLOW_DEMO_PROFILE:-false}
+      RECAPTCHA_SITE_KEY: ${RECAPTCHA_SITE_KEY:?RECAPTCHA_SITE_KEY must be set}
+      RECAPTCHA_SECRET_KEY: ${RECAPTCHA_SECRET_KEY:?RECAPTCHA_SECRET_KEY must be set}
+      RECAPTCHA_REQUIRED: ${RECAPTCHA_REQUIRED:-true}
       AI_PROVIDER: ${AI_PROVIDER:-disabled}
       AI_PROVIDER_URL: ${AI_PROVIDER_URL:-}
       AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:-}
@@ -82,6 +85,10 @@ services:
       REEF_STATIONS_JSON: ${REEF_STATIONS_JSON:-}
       UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-5242880}
       DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-365}
+      BOOTSTRAP_ADMIN_EMAILS: ${BOOTSTRAP_ADMIN_EMAILS:-}
+      BOOTSTRAP_RESEARCHER_EMAILS: ${BOOTSTRAP_RESEARCHER_EMAILS:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_RESEARCHER_PASSWORD: ${BOOTSTRAP_RESEARCHER_PASSWORD:-}
     expose:
       - "4000"
     networks:
@@ -97,12 +104,14 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_RECAPTCHA_SITE_KEY: ${VITE_RECAPTCHA_SITE_KEY:?VITE_RECAPTCHA_SITE_KEY must be set}
     restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "127.0.0.1:${WEB_PORT:-8088}:80"
     networks:
       - edge
     healthcheck:

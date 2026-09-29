@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from .parameters import PROVISIONAL_CONDITION_BANDS, SOLVER_DEFAULTS, STUDY_AREA
@@ -17,7 +17,7 @@ from .parameters import PROVISIONAL_CONDITION_BANDS, SOLVER_DEFAULTS, STUDY_AREA
 #: ``scenario`` is an exploratory run whose unconfigured parameters the caller
 #: supplies explicitly. It is never a validated profile: the response is flagged
 #: so downstream consumers can keep it out of validated results.
-ProfileLiteral = Literal["paper", "demo", "scenario"]
+ProfileLiteral = Literal["paper", "demo", "scenario", "paper-reproduction"]
 
 
 class ApiModel(BaseModel):
@@ -112,6 +112,24 @@ class CoralBaseline(ApiModel):
         return value.strip()
 
 
+class TourismGrowthPeriod(ApiModel):
+    start_year: int = Field(ge=1900, le=9999)
+    end_year: int = Field(ge=1900, le=9999)
+    growth_rate: float = Field(ge=-0.5, le=0.5)
+    unit: str = Field(min_length=1, max_length=80)
+    provenance: str = Field(min_length=1, max_length=600)
+    review_status: str = Field(default="unreviewed", min_length=1, max_length=60)
+    effective_date: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("end_year")
+    @classmethod
+    def _valid_range(cls, value: int, info: Any) -> int:
+        start = info.data.get("start_year")
+        if start is not None and value < start:
+            raise ValueError("endYear must not be before startYear")
+        return value
+
+
 class PredictRequest(ApiModel):
     """A complete, sourced run request for the published equation."""
 
@@ -122,6 +140,7 @@ class PredictRequest(ApiModel):
     profile: ProfileLiteral = "paper"
     baseline_year: int = Field(ge=1900, le=2100)
     horizon_years: int = Field(ge=1, le=100)
+    forecast_end_year: Optional[int] = Field(default=None, ge=1901, le=2200)
     coral_baseline: CoralBaseline
     parameters: dict[str, ParameterValue]
     solver: SolverRequest = Field(default_factory=SolverRequest)
@@ -131,6 +150,7 @@ class PredictRequest(ApiModel):
     sources: list[SourceMetadata] = Field(default_factory=list, max_length=50)
     model_config_version: str = Field(min_length=1, max_length=120)
     request_id: Optional[str] = Field(default=None, max_length=120)
+    tourism_growth_periods: list[TourismGrowthPeriod] = Field(default_factory=list, max_length=20)
 
     @field_validator("parameters")
     @classmethod
@@ -138,6 +158,12 @@ class PredictRequest(ApiModel):
         if not value:
             raise ValueError("at least one model parameter must be supplied")
         return value
+
+    @model_validator(mode="after")
+    def _forecast_window_matches_duration(self) -> "PredictRequest":
+        if self.forecast_end_year is not None and self.forecast_end_year != self.baseline_year + self.horizon_years:
+            raise ValueError("forecastEndYear must equal baselineYear + horizonYears")
+        return self
 
 
 class AnnualOutput(ApiModel):
@@ -150,6 +176,9 @@ class AnnualOutput(ApiModel):
     temperature_end_c: float
     tourism_start_arrivals: float
     tourism_end_arrivals: float
+    tourism_growth_rate: float
+    tourism_period_start_year: Optional[int] = None
+    tourism_period_end_year: Optional[int] = None
     growth_rate_mean: float
     thermal_rate_mean: float
     tourism_rate_mean: float
@@ -192,12 +221,15 @@ class PredictResponse(ApiModel):
     #: True when the caller substituted assumed values for unconfigured
     #: parameters. Such a run is exploratory, not a validated prediction.
     is_scenario: bool
+    is_paper_reproduction: bool = False
+    alpha_resolution: str = "explicit"
     target_measure: str
     study_area_id: str
     study_area_label: str
     scope: str
     baseline_year: int
     horizon_years: int
+    forecast_end_year: Optional[int] = None
     initial_cover_percent: float
     final_cover_percent: float
     final_interval_mean_percent: float
@@ -212,6 +244,7 @@ class PredictResponse(ApiModel):
     warnings: list[str]
     conditions: list[ConditionBand]
     missing_parameters: list[dict[str, Any]] = Field(default_factory=list)
+    tourism_growth_periods: list[TourismGrowthPeriod] = Field(default_factory=list)
 
 
 class CalibrateRequest(ApiModel):
@@ -228,6 +261,33 @@ class CalibrateRequest(ApiModel):
     condition_bands: list[ConditionBand] = Field(
         default_factory=lambda: [ConditionBand.model_validate(band) for band in PROVISIONAL_CONDITION_BANDS]
     )
+    request_id: Optional[str] = Field(default=None, max_length=120)
+
+
+class ObservationSeries(ApiModel):
+    """Annual (year, value) observations supplied by the researcher."""
+
+    label: str = Field(min_length=1, max_length=200)
+    points: list[tuple[int, float]] = Field(min_length=2)
+
+
+class ValidationRequest(ApiModel):
+    """
+    Research-only independent evaluation. Nothing here promotes a configuration
+    to reviewed or validated; it produces metrics and fitted values that a
+    researcher must still adopt through a new model configuration version.
+    """
+
+    study_area_id: str = Field(default=STUDY_AREA["id"], min_length=1, max_length=80)
+    baseline_year: int = Field(ge=1900, le=2100)
+    parameters: dict[str, ParameterValue]
+    coral_cover: ObservationSeries
+    tourism: ObservationSeries
+    train_end_year: int = Field(ge=1900, le=2100)
+    training_dataset_version: str = Field(min_length=1, max_length=200)
+    validation_dataset_version: str = Field(min_length=1, max_length=200)
+    bootstrap_samples: int = Field(default=20, ge=3, le=200)
+    seed: int = Field(default=1, ge=0, le=2**31 - 1)
     request_id: Optional[str] = Field(default=None, max_length=120)
 
 

@@ -41,7 +41,7 @@ const asList = (value: string | undefined): string[] =>
   (value ?? '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
-const isProduction = nodeEnv === 'production';
+const isProduction = nodeEnv === 'production' || nodeEnv === 'staging';
 const isTest = nodeEnv === 'test';
 const generatedDevelopmentSecret = crypto.randomBytes(32).toString('hex');
 const configuredSessionSecret = process.env.SESSION_SECRET?.trim() ?? '';
@@ -59,6 +59,13 @@ if (isProduction && useMemoryDb) {
 }
 if (isProduction && !useMemoryDb && !mongoUri) {
   throw new Error('MONGODB_URI is required in production');
+}
+if (isProduction) {
+  const origins = (process.env.WEB_ORIGIN ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+  if (origins.length === 0 || origins.some((origin) => !origin.startsWith('https://')) ||
+      !(process.env.APP_URL ?? '').startsWith('https://')) {
+    throw new Error('Staging and production require explicit HTTPS WEB_ORIGIN and APP_URL values');
+  }
 }
 
 const allowDemoProfile = asBoolean(process.env.ALLOW_DEMO_PROFILE, false);
@@ -115,11 +122,19 @@ export const config = {
     enabled: asBoolean(process.env.MAIL_CATCHER_ENABLED, false)
   },
   devVerificationEnabled: isProduction ? false : asBoolean(process.env.DEV_VERIFICATION_ENABLED, true),
+  loginOtpEnabled: isTest ? false : asBoolean(process.env.LOGIN_OTP_ENABLED, true),
+  recaptcha: {
+    siteKey: process.env.RECAPTCHA_SITE_KEY?.trim() ?? '',
+    secretKey: process.env.RECAPTCHA_SECRET_KEY?.trim() ?? '',
+    required: isProduction ? true : asBoolean(process.env.RECAPTCHA_REQUIRED, false)
+  },
   model: {
     serviceUrl: modelServiceUrl.replace(/\/+$/, ''),
     serviceToken: modelServiceToken,
     timeoutMs: asNumber(process.env.MODEL_REQUEST_TIMEOUT_MS, 15000),
-    allowDemoProfile
+    allowDemoProfile,
+    maxForecastHorizonYears: asNumber(process.env.MODEL_MAX_FORECAST_HORIZON_YEARS, 100),
+    maxForecastYear: asNumber(process.env.MODEL_MAX_FORECAST_YEAR, 2100)
   },
   ai: {
     provider: process.env.AI_PROVIDER ?? 'disabled',
@@ -198,6 +213,7 @@ if (isProduction) {
     }
   }
   if (!config.model.serviceToken) throw new Error('MODEL_SERVICE_TOKEN is required in production');
+  if (!config.recaptcha.siteKey || !config.recaptcha.secretKey) throw new Error('RECAPTCHA_SITE_KEY and RECAPTCHA_SECRET_KEY are required in production');
 }
 
 export const smtpConfigured = Boolean(config.smtp.host && config.smtp.user && config.smtp.pass && config.smtp.from);
