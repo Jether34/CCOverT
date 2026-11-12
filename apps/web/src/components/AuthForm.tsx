@@ -44,7 +44,7 @@ function Recaptcha({ onToken }: { onToken: (token: string) => void }): JSX.Eleme
 }
 
 export function AuthLayout({ title, intro, children, footer }: { title: string; intro: string; children: React.ReactNode; footer: React.ReactNode }): JSX.Element {
-  return <div className="auth-page"><div className="auth-orbit" aria-hidden="true"><span /><span /><span /></div><section className="auth-card"><div className="brand auth-brand"><span className="brand-mark" aria-hidden="true">C%</span><span>CCOverT</span></div><h1>{title}</h1><p className="lede">{intro}</p>{children}<div className="auth-footer">{footer}</div></section></div>;
+  return <div className="auth-page"><div className="auth-orbit" aria-hidden="true"><span /><span /><span /></div><section className="auth-card"><div className="brand auth-brand"><img className="brand-logo" src="/ccovert-logo.jpg" alt="" /><span>CCOverT</span></div><h1>{title}</h1><p className="lede">{intro}</p>{children}<div className="auth-footer">{footer}</div></section></div>;
 }
 
 export function AuthForm({ mode, onSubmit, onVerifyOtp, pending }: { mode: 'login' | 'signup'; onSubmit: (email: string, password: string, paperSite?: string, captchaToken?: string) => Promise<{ otpRequired?: boolean } | void>; onVerifyOtp?: (email: string, code: string) => Promise<void>; pending: boolean }): JSX.Element {

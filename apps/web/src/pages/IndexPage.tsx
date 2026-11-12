@@ -28,7 +28,7 @@ export function IndexPage(): JSX.Element {
         <section className="landing-cta"><div><p className="eyebrow">CCOverT workspace</p><h2>Explore coral-cover information with a clear, focused experience.</h2></div></section>
       </main>
       <footer className="public-footer">
-        <div className="footer-brand"><Link className="brand" to="/"><span className="brand-mark" aria-hidden="true">C%</span><span>CCOverT</span></Link><p>A Coral Cover Over Time Model for Puerto Princesa City, Palawan.</p></div>
+        <div className="footer-brand"><Link className="brand" to="/"><img className="brand-logo" src="/ccovert-logo.jpg" alt="" /><span>CCOverT</span></Link><p>A Coral Cover Over Time Model for Puerto Princesa City, Palawan.</p></div>
         <div className="footer-column"><strong>Research project</strong><span>Mathematics and Computational Science</span><span>Palawan National School</span><span>Puerto Princesa, Palawan</span></div>
         <div className="footer-column"><strong>Project team</strong><span>Jhenica O. Gabuat · Researcher</span><span>Nonie Mae C. Montojo · Adviser</span><span>Jessa Mae P. Abrina · Consultant</span></div>
         <div className="footer-column footer-links"><strong>Explore</strong><a href="#about">About</a><a href="#researcher">Researcher</a><a href="#resources">Resources</a></div>

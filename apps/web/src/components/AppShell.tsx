@@ -18,7 +18,7 @@ export function PublicHeader(): JSX.Element {
   return (
     <header className="site-header">
       <div className="header-inner">
-        <Link className="brand" to="/" aria-label="CCOverT home"><span className="brand-mark" aria-hidden="true">C%</span><span>CCOverT</span></Link>
+        <Link className="brand" to="/" aria-label="CCOverT home"><img className="brand-logo" src="/ccovert-logo.jpg" alt="" /><span>CCOverT</span></Link>
         <nav className="public-nav" aria-label="Public navigation">
           {user ? <Link className="button button-small" to="/home">Open app</Link> : <><Link to="/login">Log in</Link><Link className="button button-small" to="/signup">Create account</Link></>}
         </nav>
@@ -48,7 +48,7 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
     <div className="app-frame">
       <header className="site-header app-header">
         <div className="header-inner">
-          <Link className="brand" to="/home"><span className="brand-mark" aria-hidden="true">C%</span><span>CCOverT</span></Link>
+          <Link className="brand" to="/home"><img className="brand-logo" src="/ccovert-logo.jpg" alt="" /><span>CCOverT</span></Link>
           <div className="header-actions">
             <button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${user?.preferences.theme === 'dark' ? 'light' : 'dark'} mode`} title="Toggle theme">
               <span className="material-symbols-rounded" aria-hidden="true">{user?.preferences.theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>

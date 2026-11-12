@@ -49,9 +49,10 @@ export function AiPage(): JSX.Element {
     <AppShell>
       <div className="page-container ai-page">
         <PageHeader
-          eyebrow="Reports"
-          title="AI reports"
-          description="Choose your evidence, generate an interpretation, then reopen saved reports from the library."
+          eyebrow="Interpretation workspace"
+          title="Turn predictions into a clear story."
+          description="Choose saved evidence to generate an interpretation, then revisit every report from your library."
+          action={<span className="ai-page-context"><span className="material-symbols-rounded" aria-hidden="true">verified</span> Evidence linked to your prediction history</span>}
         />
 
         {error && <Notice tone="danger" title="Report request failed">{error}</Notice>}
@@ -59,7 +60,7 @@ export function AiPage(): JSX.Element {
         <div className="ai-layout">
           <form className="form-panel ai-builder" onSubmit={generate} noValidate>
             <fieldset disabled={pending}>
-              <div className="ai-step-heading"><span className="ai-step-number">1</span><div><p className="eyebrow">Evidence</p><h2>Choose prediction history</h2><p className="muted">Select one or more saved prediction runs for interpretation.</p></div></div>
+              <div className="ai-step-heading"><span className="ai-step-number">01</span><div><p className="eyebrow">Step one · Evidence</p><h2>Select prediction runs</h2><p className="muted">Choose the saved results you want to interpret.</p></div></div>
               <div className="ai-source-grid">
                 <div className="prediction-history-picker">
                   <div className="panel-heading"><div><p className="eyebrow">Saved runs</p><h2>Prediction history</h2></div><span className="condition-badge condition-good">{selectedPredictions.length} selected</span></div>
@@ -104,7 +105,7 @@ export function AiPage(): JSX.Element {
           </form>
 
           <section className={`report-panel ${active && !reportExpanded ? 'report-panel-collapsed' : ''}`}>
-            <div className="ai-step-heading"><span className="ai-step-number">2</span><div><p className="eyebrow">Output</p><h2>{active ? active.title : 'Report preview'}</h2><p className="muted">Your deterministic or provider-generated interpretation appears here.</p></div>{active && <button className="button button-small button-secondary" type="button" onClick={() => setReportExpanded((expanded) => !expanded)}>{reportExpanded ? 'Collapse report' : 'View full report'}</button>}</div>
+            <div className="ai-step-heading"><span className="ai-step-number">02</span><div><p className="eyebrow">Step two · Interpretation</p><h2>{active ? active.title : 'Your report will appear here'}</h2><p className="muted">Generate a report to see the interpretation, caveats, and citations.</p></div>{active && <button className="button button-small button-secondary" type="button" onClick={() => setReportExpanded((expanded) => !expanded)}>{reportExpanded ? 'Collapse report' : 'View full report'}</button>}</div>
             {active && (
               <>
                 <p className="muted">
@@ -136,12 +137,12 @@ export function AiPage(): JSX.Element {
                 )}
               </>
             )}
-            {!active && reports.length === 0 && <p className="muted">Generated reports are listed below and stay available for download.</p>}
+            {!active && <div className="ai-report-empty"><span className="material-symbols-rounded" aria-hidden="true">auto_awesome</span><strong>Start with your evidence</strong><p>Choose at least one prediction on the left. Your report will be saved automatically.</p></div>}
           </section>
         </div>
 
         <section className="panel ai-library">
-          <div className="ai-step-heading"><span className="ai-step-number">3</span><div><p className="eyebrow">Library</p><h2>Saved reports</h2><p className="muted">Open a previous report to review its evidence and interpretation.</p></div></div>
+          <div className="ai-step-heading"><span className="ai-step-number">03</span><div><p className="eyebrow">Your library</p><h2>Saved interpretations</h2><p className="muted">Reopen a previous report to review its evidence and findings.</p></div><span className="condition-badge condition-good">{reports.length} {reports.length === 1 ? 'report' : 'reports'}</span></div>
           {reports.length === 0 ? <p className="muted">No reports yet.</p> : (
             <div className="ai-library-list">
               {reports.map((report) => (
