@@ -28,8 +28,9 @@ export function PublicHeader(): JSX.Element {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }): JSX.Element {
-  const { user, updatePreferences } = useAuth();
+  const { user, updatePreferences, logout } = useAuth();
   const [announcement, setAnnouncement] = useState('');
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
   useEffect(() => {
     const refresh = (): void => {
       fetch('/api/v1/developer/config', { credentials: 'include' })
@@ -57,14 +58,23 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
         </div>
       </header>
       {announcement && <div className="system-announcement" role="status">{announcement}</div>}
-      <nav className="nav-island" aria-label="Primary navigation">
-        {navItems.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end} className={linkClass} aria-label={item.label}>
-            <span className="material-symbols-rounded nav-icon" aria-hidden="true">{item.icon}</span>
-            <span className="sr-only">{item.label}</span>
-          </NavLink>
-        ))}
-      </nav>
+      <aside className={`app-sidebar${sidebarExpanded ? ' app-sidebar-expanded' : ''}`} aria-label="Workspace sidebar">
+        <button className="sidebar-toggle" type="button" aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={sidebarExpanded} onClick={() => setSidebarExpanded((expanded) => !expanded)} title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}>
+          <span className="material-symbols-rounded" aria-hidden="true">{sidebarExpanded ? 'left_panel_close' : 'left_panel_open'}</span>
+        </button>
+        <nav className="nav-island" aria-label="Primary navigation">
+          {navItems.map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end} className={linkClass} aria-label={item.label}>
+              <span className="material-symbols-rounded nav-icon" aria-hidden="true">{item.icon}</span>
+              <span className="nav-label">{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+        <button className="sidebar-logout" type="button" aria-label="Log out" title="Log out" onClick={() => void logout()}>
+          <span className="material-symbols-rounded" aria-hidden="true">logout</span>
+          <span className="sidebar-label">Log out</span>
+        </button>
+      </aside>
       {!user?.emailVerified && (user?.role === 'client' || user?.role === 'user') && (
         <div className="verification-banner" role="status">
           Verify your email to unlock saved predictions, data import, and reports. <Link to="/settings">Open settings</Link>

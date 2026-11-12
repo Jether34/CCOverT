@@ -788,3 +788,53 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 .ai-page .ai-library-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); gap:.8rem; }
 .ai-page .ai-library-card { padding:1rem; border-radius:.9rem; }
 @media(max-width:900px) { .ai-page .ai-layout { grid-template-columns:1fr; } }
+
+/* Desktop workspace grid and explicit sidebar controls. These final rules
+   replace the older hover-only sidebar behavior while preserving mobile nav. */
+@media (min-width: 901px) {
+  .app-sidebar { position: fixed; top: 5.25rem; bottom: .9rem; left: .9rem; z-index: 30; display: flex; width: 4.25rem; flex-direction: column; gap: .65rem; padding: .5rem; border: 1px solid var(--line); border-radius: 1.35rem; background: var(--surface); box-shadow: var(--shadow); transition: width .2s ease; }
+  .app-sidebar.app-sidebar-expanded { width: 12rem; }
+  .sidebar-toggle, .sidebar-logout { display: flex; align-items: center; justify-content: flex-start; gap: .7rem; min-height: 2.8rem; border: 0; border-radius: .85rem; padding: .65rem .7rem; color: var(--muted); background: transparent; font: inherit; font-size: .8rem; font-weight: 800; cursor: pointer; }
+  .sidebar-toggle { color: var(--ink); background: var(--surface-2); }
+  .sidebar-toggle:hover, .sidebar-logout:hover { color: var(--accent-strong); background: var(--surface-3); }
+  .sidebar-toggle .material-symbols-rounded, .sidebar-logout .material-symbols-rounded { flex: 0 0 auto; font-size: 1.25rem; }
+  .nav-island { position: static; display: flex; width: 100%; min-height: 0; flex: 0 0 auto; flex-direction: column; gap: .2rem; margin: 0; padding: 0; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .app-sidebar .nav-island:hover, .app-sidebar .nav-island:focus-within { width: 100%; }
+  .nav-island .nav-link { justify-content: flex-start; gap: .7rem; min-height: 2.85rem; padding: .65rem .7rem; border: 0; border-radius: .85rem; color: var(--muted); font-size: .8rem; white-space: nowrap; }
+  .nav-island .nav-link:hover { color: var(--ink); background: var(--surface-2); transform: none; }
+  .nav-island .nav-link.active { color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+  .nav-island .nav-icon { flex: 0 0 auto; font-size: 1.25rem; }
+  .nav-label, .sidebar-label { display: none; }
+  .app-sidebar-expanded .nav-label, .app-sidebar-expanded .sidebar-label { display: inline; }
+  .sidebar-logout { margin-top: auto; color: var(--danger, #a63e43); }
+  .sidebar-logout:hover { color: #8f3035; background: color-mix(in srgb, #a63e43 10%, var(--surface)); }
+  .settings-logout { display: none; }
+}
+.ai-page { gap: 1rem; }
+.ai-page .ai-layout { grid-template-columns: minmax(16rem, .95fr) minmax(22rem, 1.3fr) minmax(17rem, .95fr); align-items: stretch; gap: 1rem; }
+.ai-page .ai-builder, .ai-page .report-panel, .ai-page .ai-library { min-width: 0; min-height: 26rem; height: auto; align-self: stretch; }
+.ai-page .ai-builder fieldset { display: flex; flex-direction: column; gap: 1rem; }
+.ai-page .ai-library { display: flex; flex-direction: column; }
+.ai-page .ai-library-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: .7rem; max-height: min(62vh, 38rem); overflow: auto; padding-right: .2rem; }
+.ai-page .ai-library-card { transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.ai-page .ai-library-card:hover { transform: translateY(-2px); border-color: var(--aqua); box-shadow: var(--shadow); }
+.ai-page .ai-library-card .button:focus-visible, .ai-page .ai-prediction-card:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ai-page .ai-step-heading { min-width: 0; }
+.ai-page .ai-step-heading h2, .ai-page .ai-library-card h3 { overflow-wrap: anywhere; }
+.ai-page .ai-report-empty { transition: border-color .15s ease, background .15s ease; }
+.ai-page .ai-prediction-card:has(input:checked) { transform: translateY(-1px); }
+.settings-logout { justify-content: center; }
+@media (max-width: 1250px) {
+  .ai-page .ai-layout { grid-template-columns: minmax(16rem, .9fr) minmax(0, 1.1fr); }
+  .ai-page .ai-library { grid-column: 1 / -1; min-height: 0; }
+  .ai-page .ai-library-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
+}
+@media (max-width: 900px) {
+  .app-sidebar { display: contents; }
+  .sidebar-toggle, .sidebar-logout { display: none; }
+  .nav-island .nav-label { display: none; }
+  .ai-page .ai-layout { grid-template-columns: minmax(0, 1fr); }
+  .ai-page .ai-library { grid-column: auto; }
+  .ai-page .ai-library-list { grid-template-columns: 1fr; max-height: none; }
+  .settings-logout { display: flex; justify-content: center; }
+}
