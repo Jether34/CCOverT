@@ -752,6 +752,22 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
   .ai-page .ai-library .ai-step-heading > .condition-badge { margin-left: 0; }
 }
 
+/* Keep the three report stages together as a responsive desktop grid. */
+.ai-page .ai-layout { grid-template-columns: minmax(16rem, .92fr) minmax(22rem, 1.22fr) minmax(17rem, .96fr); align-items: stretch; }
+.ai-page .ai-builder, .ai-page .report-panel, .ai-page .ai-library { min-width: 0; height: auto; }
+.ai-page .ai-library { align-self: stretch; }
+.ai-page .ai-library-list { grid-template-columns: 1fr; }
+@media (max-width: 1250px) {
+  .ai-page .ai-layout { grid-template-columns: minmax(16rem, .9fr) minmax(0, 1.1fr); }
+  .ai-page .ai-library { grid-column: 1 / -1; }
+  .ai-page .ai-library-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
+}
+@media (max-width: 900px) {
+  .ai-page .ai-layout { grid-template-columns: 1fr; }
+  .ai-page .ai-library { grid-column: auto; }
+  .ai-page .ai-library-list { grid-template-columns: 1fr; }
+}
+
 /* Interpretation workspace: clear evidence, preview, and history hierarchy. */
 .brand-logo { display:block; width:2.35rem; height:2.35rem; object-fit:contain; border-radius:.45rem; }
 .ai-page { gap:1.1rem; }

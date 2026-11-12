@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { AiReport, PredictionRecord } from '@ccovert/shared';
 import { aiApi, getErrorMessage, predictionsApi } from '../lib/api';
-import { AppShell, PageHeader } from '../components/AppShell';
+import { AppShell } from '../components/AppShell';
 import { EmptyState, Notice } from '../components/States';
 import { ConditionBadge, WarningList } from '../components/ReferenceChart';
 
@@ -48,13 +48,6 @@ export function AiPage(): JSX.Element {
   return (
     <AppShell>
       <div className="page-container ai-page">
-        <PageHeader
-          eyebrow="Interpretation workspace"
-          title="Turn predictions into a clear story."
-          description="Choose saved evidence to generate an interpretation, then revisit every report from your library."
-          action={<span className="ai-page-context"><span className="material-symbols-rounded" aria-hidden="true">verified</span> Evidence linked to your prediction history</span>}
-        />
-
         {error && <Notice tone="danger" title="Report request failed">{error}</Notice>}
 
         <div className="ai-layout">
@@ -139,8 +132,6 @@ export function AiPage(): JSX.Element {
             )}
             {!active && <div className="ai-report-empty"><span className="material-symbols-rounded" aria-hidden="true">auto_awesome</span><strong>Start with your evidence</strong><p>Choose at least one prediction on the left. Your report will be saved automatically.</p></div>}
           </section>
-        </div>
-
         <section className="panel ai-library">
           <div className="ai-step-heading"><span className="ai-step-number">03</span><div><p className="eyebrow">Your library</p><h2>Saved interpretations</h2><p className="muted">Reopen a previous report to review its evidence and findings.</p></div><span className="condition-badge condition-good">{reports.length} {reports.length === 1 ? 'report' : 'reports'}</span></div>
           {reports.length === 0 ? <p className="muted">No reports yet.</p> : (
@@ -161,6 +152,7 @@ export function AiPage(): JSX.Element {
             </div>
           )}
         </section>
+        </div>
       </div>
     </AppShell>
   );
