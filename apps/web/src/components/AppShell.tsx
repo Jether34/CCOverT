@@ -69,11 +69,11 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
               <span className="nav-label">{item.label}</span>
             </NavLink>
           ))}
+          <button className="sidebar-logout" type="button" aria-label="Log out" title="Log out" onClick={() => void logout()}>
+            <span className="material-symbols-rounded" aria-hidden="true">logout</span>
+            <span className="sidebar-label">Log out</span>
+          </button>
         </nav>
-        <button className="sidebar-logout" type="button" aria-label="Log out" title="Log out" onClick={() => void logout()}>
-          <span className="material-symbols-rounded" aria-hidden="true">logout</span>
-          <span className="sidebar-label">Log out</span>
-        </button>
       </aside>
       {!user?.emailVerified && (user?.role === 'client' || user?.role === 'user') && (
         <div className="verification-banner" role="status">

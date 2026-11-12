@@ -806,7 +806,7 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
   .nav-island .nav-icon { flex: 0 0 auto; font-size: 1.25rem; }
   .nav-label, .sidebar-label { display: none; }
   .app-sidebar-expanded .nav-label, .app-sidebar-expanded .sidebar-label { display: inline; }
-  .sidebar-logout { margin-top: auto; color: var(--danger, #a63e43); }
+  .sidebar-logout { width: 100%; margin-top: .25rem; border-top: 1px solid var(--line); border-radius: 0 0 .85rem .85rem; color: var(--danger, #a63e43); }
   .sidebar-logout:hover { color: #8f3035; background: color-mix(in srgb, #a63e43 10%, var(--surface)); }
   .settings-logout { display: none; }
 }
