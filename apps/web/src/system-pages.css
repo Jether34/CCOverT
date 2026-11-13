@@ -503,6 +503,24 @@ summary:focus-visible {
   .history-record.is-selected > .prediction-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
   .history-record.is-selected > .prediction-card { box-shadow: inset 4px 0 var(--accent); }
   .history-record:focus-visible { outline: 3px solid var(--system-outline); outline-offset: 3px; }
+
+  /* Keep the report library readable at common desktop widths. */
+  .ai-page .ai-layout {
+    grid-template-columns: minmax(18rem, .95fr) minmax(25rem, 1.3fr) minmax(20rem, 1fr);
+  }
+  .ai-page .ai-prediction-list {
+    grid-auto-rows: min-content;
+    align-content: start;
+  }
+  .ai-page .ai-prediction-card { align-items: start; }
+  .ai-page .ai-prediction-card > input { margin-top: .35rem; }
+  .ai-page .ai-library-list {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+    align-content: start;
+  }
+  .ai-page .ai-library-card-meta { min-width: 0; align-items: flex-start; flex-wrap: wrap; }
+  .ai-page .ai-library-card-meta > .muted { white-space: nowrap; }
+  .ai-page .ai-library-card-body > p { overflow-wrap: anywhere; }
 }
 
 @media (min-width: 901px) and (max-width: 1499px) {
