@@ -29,7 +29,7 @@ export function HomePage(): JSX.Element {
 
   return (
     <AppShell>
-      <div className="page-container">
+      <div className="page-container dashboard-page">
         <PageHeader
           eyebrow="Workspace"
           title="Dashboard"

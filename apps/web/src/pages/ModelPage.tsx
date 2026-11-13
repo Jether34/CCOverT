@@ -95,7 +95,7 @@ export function ModelPage({ compact = false }: { compact?: boolean }): JSX.Eleme
 
   return (
     <AppShell>
-      <div className="page-container">
+      <div className={`page-container model-page${compact ? ' researcher-page' : ''}`}>
         <PageHeader eyebrow="Model configuration" title="One model for every client" description="Edit the active model parameters. Saving applies the new values immediately to every client prediction." />
         {!compact && <ModelStatusBanner />}
         {error && <Notice tone="danger" title="Request failed">{error}</Notice>}

@@ -53,7 +53,7 @@ export function DeveloperPage(): JSX.Element {
     finally { setPending(false); }
   };
 
-  return <AppShell><div className="page-container">
+  return <AppShell><div className="page-container developer-page">
     <PageHeader eyebrow="Developer operations" title="Developer dashboard" description="Live service activity, accounts, shared settings, and database operations." />
     {error && <Notice tone="danger" title="Operation failed">{error}</Notice>}
     {message && <Notice tone="success" title="Saved">{message}</Notice>}
