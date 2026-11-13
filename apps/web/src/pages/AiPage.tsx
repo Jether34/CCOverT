@@ -137,7 +137,21 @@ export function AiPage(): JSX.Element {
           {reports.length === 0 ? <p className="muted">No reports yet.</p> : (
             <div className="ai-library-list">
               {reports.map((report) => (
-                <article className="ai-library-card" key={report.id}>
+                <article
+                  className={`ai-library-card${active?.id === report.id ? ' is-active' : ''}`}
+                  key={report.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={active?.id === report.id}
+                  onClick={() => { setActive(report); setReportExpanded(true); }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setActive(report);
+                      setReportExpanded(true);
+                    }
+                  }}
+                >
                   <div className="ai-library-card-meta">
                     <ConditionBadge label={report.generatedBy === 'ai-provider' ? 'AI report' : 'Deterministic summary'} status={report.generatedBy === 'ai-provider' ? 'good' : 'warning'} />
                     <span className="muted">{new Date(report.createdAt).toLocaleDateString()}</span>
@@ -145,7 +159,7 @@ export function AiPage(): JSX.Element {
                   <div className="ai-library-card-body">
                     <h3>{report.title}</h3>
                     <p className="muted">{report.referencedPredictionIds.length} prediction(s) · {report.referencedUploadIds.length} document(s) · {report.citations.length} citation(s)</p>
-                    <button className="button button-small button-secondary" type="button" onClick={() => { setActive(report); setReportExpanded(true); }}>Open report</button>
+                    <span className="ai-library-open">Open report <span aria-hidden="true">→</span></span>
                   </div>
                 </article>
               ))}

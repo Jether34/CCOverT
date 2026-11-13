@@ -450,6 +450,10 @@ summary:focus-visible {
     overflow: hidden;
   }
 
+  .ai-page .ai-builder { grid-column: 1; grid-row: 1; }
+  .ai-page .report-panel { grid-column: 2; grid-row: 1; }
+  .ai-page .ai-library { grid-column: 3; grid-row: 1; }
+
   .ai-page .ai-builder,
   .ai-page .report-panel,
   .ai-page .ai-library {
@@ -488,6 +492,17 @@ summary:focus-visible {
   .ai-page .report-panel > .ai-report-empty { min-height: 0; flex: 1 1 auto; }
   .ai-page .ai-library .ai-step-heading { flex-wrap: wrap; }
   .ai-page .ai-library-list { min-height: 0; grid-template-columns: 1fr; flex: 1 1 auto; max-height: none; overflow: auto; overscroll-behavior: contain; padding-right: .2rem; }
+  .ai-page .ai-library-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); align-content: start; }
+  .ai-page .ai-library-card { align-content: start; min-height: 8.5rem; cursor: pointer; text-align: left; }
+  .ai-page .ai-library-card.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface-2)); box-shadow: inset 4px 0 var(--accent), var(--system-shadow); }
+  .ai-page .ai-library-open { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .2rem; color: var(--accent); font-size: .78rem; font-weight: 850; }
+  .ai-page .ai-library-open span { font-size: 1.1rem; }
+  .history-record { border-radius: var(--system-control-radius); cursor: pointer; }
+  .history-record > .prediction-card { transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease; }
+  .history-record:hover > .prediction-card,
+  .history-record.is-selected > .prediction-card { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
+  .history-record.is-selected > .prediction-card { box-shadow: inset 4px 0 var(--accent); }
+  .history-record:focus-visible { outline: 3px solid var(--system-outline); outline-offset: 3px; }
 }
 
 @media (min-width: 901px) and (max-width: 1499px) {
@@ -522,4 +537,10 @@ summary:focus-visible {
   .history-page > section.panel { padding: .7rem; }
   .ai-page .ai-step-heading p { display: none; }
   .ai-page .ai-prediction-card { min-height: 3.6rem; }
+}
+
+@media (max-width: 900px) {
+  .ai-page .ai-library-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); }
+  .ai-page .ai-library-card { min-height: 8.5rem; cursor: pointer; text-align: left; }
+  .ai-page .ai-library-card.is-active { border-color: var(--accent); box-shadow: inset 4px 0 var(--accent); }
 }

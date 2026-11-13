@@ -37,13 +37,21 @@ export function HistoryPage(): JSX.Element {
   useEffect(load, [load]);
 
   useEffect(() => {
-    if (selectedId && records.length > 0 && (!selected || selected.predictionId !== selectedId)) {
-      const found = records.find((record) => record.predictionId === selectedId);
-      if (found) setSelected(found);
-      else predictionsApi.get(selectedId).then(({ prediction }) => setSelected(prediction)).catch(() => setSelected(null));
+    if (records.length === 0) {
+      if (!selectedId) setSelected(null);
+      return;
     }
-    if (!selectedId) setSelected(null);
-  }, [records, selected, selectedId]);
+
+    const targetId = selectedId ?? records[0].predictionId;
+    const found = records.find((record) => record.predictionId === targetId);
+    if (!selectedId && found) setParams({ prediction: found.predictionId }, { replace: true });
+    if (found && selected?.predictionId !== found.predictionId) {
+      setSelected(found);
+      predictionsApi.reportsFor(found.predictionId).then((response) => setReports(response.reports)).catch(() => setReports([]));
+    } else if (!found && selectedId && (!selected || selected.predictionId !== selectedId)) {
+      predictionsApi.get(selectedId).then(({ prediction }) => setSelected(prediction)).catch(() => setSelected(null));
+    }
+  }, [records, selected, selectedId, setParams]);
 
   return (
     <AppShell>
@@ -70,8 +78,20 @@ export function HistoryPage(): JSX.Element {
               <div className="panel-heading"><div><p className="eyebrow">All runs</p><h2>{total} saved</h2></div></div>
               <div className="record-list">
                 {records.map((record) => (
-                  <div key={record.predictionId} onClick={() => open(record.predictionId)} role="button" tabIndex={0}
-                    onKeyDown={(event) => { if (event.key === 'Enter') open(record.predictionId); }}>
+                  <div
+                    key={record.predictionId}
+                    className={`history-record${selected?.predictionId === record.predictionId ? ' is-selected' : ''}`}
+                    onClick={() => open(record.predictionId)}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={selected?.predictionId === record.predictionId}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        open(record.predictionId);
+                      }
+                    }}
+                  >
                     <PredictionSummaryCard prediction={record} />
                   </div>
                 ))}
@@ -86,7 +106,6 @@ export function HistoryPage(): JSX.Element {
                     <h2>{selected.baselineYear}-{selected.forecastEndYear ?? selected.baselineYear + selected.horizonYears} &middot; {selected.status === 'unavailable' ? 'Not completed' : `${selected.finalCoverPercent.toFixed(2)}%`}</h2>
                   </div>
                   <div className="button-row">
-                    <button className="button button-small button-secondary" type="button" onClick={() => { setSelected(null); setParams({}, { replace: true }); }}>Close details</button>
                     <button className="button button-small button-secondary" type="button" onClick={() => downloadPrediction(selected.predictionId, 'pdf')}>PDF</button>
                     <button className="button button-small button-secondary" type="button" onClick={() => downloadPrediction(selected.predictionId, 'csv')}>CSV</button>
                     <Link className="button button-small button-primary" to={`/ai?prediction=${selected.predictionId}`}>Generate report</Link>
