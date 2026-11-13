@@ -41,6 +41,8 @@ code { font-family:Consolas,monospace; color:#0a6767; font-size:8.6pt; }
 .shots { display:grid; grid-template-columns:1fr 1fr; gap:12pt; align-items:start; margin-top:10pt; }
 .shots figure { margin:0; text-align:center; }
   .shots img { display:block; width:100%; height:198mm; object-fit:contain; object-position:top; border:1px solid #d6e1e7; border-radius:8pt; background:#f3f7fb; }
+.shots.single { grid-template-columns:1fr; }
+.shots.single img { height:220mm; }
 .shots figcaption { margin-top:6pt; font-size:9pt; font-weight:700; color:#214559; }
 @media screen { body { max-width: 850px; margin: 40px auto; padding:0 30px; } .page,.cover { margin-bottom:50px; } }
 </style>
@@ -109,37 +111,59 @@ code { font-family:Consolas,monospace; color:#0a6767; font-size:8.6pt; }
   <p>This inventory is taken from the web application's route definitions. “Not captured” means this documentation has no verified mobile emulator screenshot for that route.</p>
   <table><thead><tr><th>Interface</th><th>Route</th><th>Access</th><th>Mobile capture</th></tr></thead><tbody>
   <tr><td>Public landing</td><td><code>/</code></td><td>Public</td><td>Deployed Android emulator</td></tr>
-  <tr><td>Sign up</td><td><code>/signup</code></td><td>Public</td><td>Not captured</td></tr>
-  <tr><td>Log in</td><td><code>/login</code></td><td>Public</td><td>Prior local capture only</td></tr>
+  <tr><td>Sign up</td><td><code>/signup</code></td><td>Public</td><td>Mobile screenshot included</td></tr>
+  <tr><td>Log in</td><td><code>/login</code></td><td>Public</td><td>Mobile screenshot included</td></tr>
   <tr><td>Email verification</td><td><code>/verify</code></td><td>Public, token flow</td><td>Not captured</td></tr>
   <tr><td>Forgot password</td><td><code>/forgot-password</code></td><td>Public</td><td>Not captured</td></tr>
-  <tr><td>Reset password</td><td><code>/reset-password</code></td><td>Public, token flow</td><td>Not captured</td></tr>
+  <tr><td>Reset password</td><td><code>/reset-password</code></td><td>Public, token flow</td><td>Mobile screenshot included</td></tr>
   <tr><td>Role home (dashboard)</td><td><code>/home</code></td><td>Signed in</td><td>Deployed Android emulator</td></tr>
-  <tr><td>Prediction</td><td><code>/predict</code></td><td>Verified account</td><td>Not captured</td></tr>
-  <tr><td>History</td><td><code>/history</code></td><td>Verified account</td><td>Not captured</td></tr>
+  <tr><td>Prediction</td><td><code>/predict</code></td><td>Verified account</td><td>Mobile screenshot included</td></tr>
+  <tr><td>History</td><td><code>/history</code></td><td>Verified account</td><td>Mobile screenshot included</td></tr>
   <tr><td>Model configuration</td><td><code>/model</code></td><td>Researcher</td><td>Not captured</td></tr>
   <tr><td>Researcher workspace</td><td><code>/researcher</code></td><td>Researcher</td><td>Not captured</td></tr>
   <tr><td>Developer controls</td><td><code>/developer</code></td><td>Admin</td><td>Not captured</td></tr>
-  <tr><td>AI reports</td><td><code>/ai</code></td><td>Verified account</td><td>Not captured</td></tr>
-  <tr><td>Settings</td><td><code>/settings</code></td><td>Signed in</td><td>Not captured</td></tr>
+  <tr><td>AI reports</td><td><code>/ai</code></td><td>Verified account</td><td>Mobile screenshot included</td></tr>
+  <tr><td>Settings</td><td><code>/settings</code></td><td>Signed in</td><td>Mobile screenshot included</td></tr>
   <tr><td>Guide and FAQ</td><td><code>/guide</code></td><td>Signed in</td><td>Not captured</td></tr>
   </tbody></table>
-  <div class="note">Coverage is incomplete: deployed emulator captures are available for the public landing page and signed-in dashboard. The requested screenshots for the other routes have not been produced.</div>
+  <div class="note">This edition includes mobile screenshots for the landing page, dashboard, prediction, history, reports, settings, sign up, log in, and password reset. Email verification, forgot password, model configuration, researcher workspace, developer controls, and guide remain without screenshots.</div>
 </section>
 <section class="page">
-  <p class="kicker">06 · Mobile Screenshots</p><h2>System pages · mobile view</h2>
-  <p>The deployed public landing page was captured in the Android emulator at 1224 × 2720 pixels, 440 dpi. The sign-in screenshot below is from the earlier local capture at a 480 × 900 CSS-pixel viewport. Authenticated and remaining account pages still need emulator captures.</p>
-  <div class="shots">
-    <figure><img src="system-screenshots/emulator-home.png"><figcaption>Deployed public landing page · Android emulator · 1224 × 2720 px · 440 dpi</figcaption></figure>
-    <figure><img src="system-screenshots/mobile-login.png"><figcaption>Sign-in page · prior local capture · 480 × 900 CSS px</figcaption></figure>
-  </div>
-  <p class="note" style="margin-top:16pt">Capture status: deployed landing page verified. The emulator route-navigation action was blocked by automatic review, so this edition does not claim complete deployed screenshots for authenticated interfaces, sign-up, or password reset.</p>
-  <p class="footer">CCOverT · System Documentation · Generated from the repository source and docs. Exact runtime status depends on the deployed environment.</p>
+  <p class="kicker">06 · System Pages · Mobile View</p><h2>Public landing page</h2>
+  <p>Deployed website displayed in the Android emulator at 1224 × 2720 pixels, 440 dpi.</p>
+  <div class="shots single"><figure><img src="system-screenshots/emulator-home.png"><figcaption>Public landing · deployed site · Android emulator</figcaption></figure></div>
 </section>
 <section class="page">
-  <p class="kicker">07 · Mobile Screenshot</p><h2>Signed-in dashboard</h2>
-  <p>Captured from the deployed site in the Android emulator at 1224 × 2720 pixels, 440 dpi. The active session was already signed in when captured.</p>
-  <div class="shots" style="grid-template-columns:1fr"><figure><img src="system-screenshots/emulator-dashboard.png"><figcaption>Dashboard · deployed website · Android emulator · 1224 × 2720 px · 440 dpi</figcaption></figure></div>
+  <p class="kicker">06 · System Pages · Mobile View</p><h2>Dashboard</h2>
+  <div class="shots single"><figure><img src="system-screenshots/mobile-dashboard.png"><figcaption>Dashboard · deployed site · mobile browser screenshot</figcaption></figure></div>
+</section>
+<section class="page">
+  <p class="kicker">06 · System Pages · Mobile View</p><h2>Prediction</h2>
+  <div class="shots single"><figure><img src="system-screenshots/mobile-predict.png"><figcaption>Prediction · deployed site · mobile browser screenshot</figcaption></figure></div>
+</section>
+<section class="page">
+  <p class="kicker">06 · System Pages · Mobile View</p><h2>Prediction history</h2>
+  <div class="shots single"><figure><img src="system-screenshots/mobile-history.png"><figcaption>History · deployed site · mobile browser screenshot</figcaption></figure></div>
+</section>
+<section class="page">
+  <p class="kicker">06 · System Pages · Mobile View</p><h2>Reports</h2>
+  <div class="shots single"><figure><img src="system-screenshots/mobile-reports.png"><figcaption>Reports · deployed site · mobile browser screenshot</figcaption></figure></div>
+</section>
+<section class="page">
+  <p class="kicker">06 · System Pages · Mobile View</p><h2>Settings</h2>
+  <div class="shots single"><figure><img src="system-screenshots/mobile-settings.png"><figcaption>Settings · deployed site · mobile browser screenshot</figcaption></figure></div>
+</section>
+<section class="page">
+  <p class="kicker">07 · Authentication · Mobile View</p><h2>Sign up</h2>
+  <div class="shots single"><figure><img src="system-screenshots/mobile-signup.png"><figcaption>Sign up · deployed site · mobile browser screenshot</figcaption></figure></div>
+</section>
+<section class="page">
+  <p class="kicker">07 · Authentication · Mobile View</p><h2>Log in</h2>
+  <div class="shots single"><figure><img src="system-screenshots/mobile-login.png"><figcaption>Log in · deployed site · mobile browser screenshot</figcaption></figure></div>
+</section>
+<section class="page">
+  <p class="kicker">07 · Authentication · Mobile View</p><h2>Reset password</h2>
+  <div class="shots single"><figure><img src="system-screenshots/mobile-reset-password.png"><figcaption>Password reset · deployed site · mobile browser screenshot</figcaption></figure></div>
 </section>
 </body>
 </html>
