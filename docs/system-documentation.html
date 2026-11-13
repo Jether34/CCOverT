@@ -16,6 +16,7 @@ p { margin: 0 0 8pt; }
 small,.muted { color: #607589; }
 .cover { height: 255mm; display:flex; flex-direction:column; justify-content:space-between; padding: 18mm 0 12mm; page-break-after:always; }
 .brand { color:#087e79; font-weight:800; letter-spacing:2pt; text-transform:uppercase; font-size:10pt; }
+.cover-logo { display:block; width:76mm; height:27mm; object-fit:cover; object-position:center; }
 .kicker { color:#087e79; font-weight:800; letter-spacing:1.6pt; text-transform:uppercase; font-size:9pt; }
 .lead { font-size:13pt; max-width: 145mm; color:#536b80; }
 .hero { border-radius: 12pt; background:linear-gradient(135deg,#12364a,#087e79); color:white; padding:20pt; margin-top:18pt; }
@@ -49,7 +50,7 @@ code { font-family:Consolas,monospace; color:#0a6767; font-size:8.6pt; }
 </head>
 <body>
 <section class="cover">
-  <div><div class="brand">C% &nbsp; CCOverT</div><div style="height:48mm"></div><p class="kicker">System reference · 2026</p><h1>System<br>Documentation</h1><p class="lead">Internal design, application programming interfaces, services, and operational controls for the CCOverT coral-cover research workspace.</p>
+  <div><img class="cover-logo" src="system-assets/ccovert-system-logo.jpg" alt="CCOverT system logo"><div style="height:48mm"></div><p class="kicker">System reference · 2026</p><h1>System<br>Documentation</h1><p class="lead">Internal design, application programming interfaces, services, and operational controls for the CCOverT coral-cover research workspace.</p>
     <div class="hero"><strong>Annual live coral-cover projections</strong><p>Research workspace for Puerto Princesa City, Palawan. Users can explore prediction history and reports; researchers manage the shared model configuration; developers operate account and service controls.</p></div>
   </div>
   <div><span class="pill">React · TypeScript</span><span class="pill">Express API</span><span class="pill">FastAPI model</span><span class="pill">MongoDB</span><p class="footer" style="margin-top:18pt">Prepared from the application source and repository documentation. Deployment configuration values and credentials are intentionally excluded.</p></div>
