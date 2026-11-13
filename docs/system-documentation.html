@@ -114,7 +114,7 @@ code { font-family:Consolas,monospace; color:#0a6767; font-size:8.6pt; }
   <tr><td>Email verification</td><td><code>/verify</code></td><td>Public, token flow</td><td>Not captured</td></tr>
   <tr><td>Forgot password</td><td><code>/forgot-password</code></td><td>Public</td><td>Not captured</td></tr>
   <tr><td>Reset password</td><td><code>/reset-password</code></td><td>Public, token flow</td><td>Not captured</td></tr>
-  <tr><td>Role home</td><td><code>/home</code></td><td>Signed in</td><td>Not captured</td></tr>
+  <tr><td>Role home (dashboard)</td><td><code>/home</code></td><td>Signed in</td><td>Deployed Android emulator</td></tr>
   <tr><td>Prediction</td><td><code>/predict</code></td><td>Verified account</td><td>Not captured</td></tr>
   <tr><td>History</td><td><code>/history</code></td><td>Verified account</td><td>Not captured</td></tr>
   <tr><td>Model configuration</td><td><code>/model</code></td><td>Researcher</td><td>Not captured</td></tr>
@@ -124,7 +124,7 @@ code { font-family:Consolas,monospace; color:#0a6767; font-size:8.6pt; }
   <tr><td>Settings</td><td><code>/settings</code></td><td>Signed in</td><td>Not captured</td></tr>
   <tr><td>Guide and FAQ</td><td><code>/guide</code></td><td>Signed in</td><td>Not captured</td></tr>
   </tbody></table>
-  <div class="note">Coverage is incomplete: only the public landing page has a deployed emulator capture in this edition. The page screenshots requested for the remaining routes have not been produced.</div>
+  <div class="note">Coverage is incomplete: deployed emulator captures are available for the public landing page and signed-in dashboard. The requested screenshots for the other routes have not been produced.</div>
 </section>
 <section class="page">
   <p class="kicker">06 · Mobile Screenshots</p><h2>System pages · mobile view</h2>
@@ -135,6 +135,11 @@ code { font-family:Consolas,monospace; color:#0a6767; font-size:8.6pt; }
   </div>
   <p class="note" style="margin-top:16pt">Capture status: deployed landing page verified. The emulator route-navigation action was blocked by automatic review, so this edition does not claim complete deployed screenshots for authenticated interfaces, sign-up, or password reset.</p>
   <p class="footer">CCOverT · System Documentation · Generated from the repository source and docs. Exact runtime status depends on the deployed environment.</p>
+</section>
+<section class="page">
+  <p class="kicker">07 · Mobile Screenshot</p><h2>Signed-in dashboard</h2>
+  <p>Captured from the deployed site in the Android emulator at 1224 × 2720 pixels, 440 dpi. The active session was already signed in when captured.</p>
+  <div class="shots" style="grid-template-columns:1fr"><figure><img src="system-screenshots/emulator-dashboard.png"><figcaption>Dashboard · deployed website · Android emulator · 1224 × 2720 px · 440 dpi</figcaption></figure></div>
 </section>
 </body>
 </html>
