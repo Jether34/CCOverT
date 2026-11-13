@@ -1,0 +1,117 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CCOverT | System Documentation</title>
+<style>
+@page { size: A4; margin: 15mm 16mm 16mm; }
+:root { color: #17283a; font-family: "Segoe UI", Arial, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; font-size: 10pt; line-height: 1.5; color: #26384b; }
+h1,h2,h3 { color: #12364a; margin: 0 0 8pt; line-height: 1.15; }
+h1 { font-size: 29pt; letter-spacing: -.7pt; }
+h2 { font-size: 19pt; margin-top: 0; }
+h3 { font-size: 11pt; margin-top: 13pt; }
+p { margin: 0 0 8pt; }
+small,.muted { color: #607589; }
+.cover { height: 255mm; display:flex; flex-direction:column; justify-content:space-between; padding: 18mm 0 12mm; page-break-after:always; }
+.brand { color:#087e79; font-weight:800; letter-spacing:2pt; text-transform:uppercase; font-size:10pt; }
+.kicker { color:#087e79; font-weight:800; letter-spacing:1.6pt; text-transform:uppercase; font-size:9pt; }
+.lead { font-size:13pt; max-width: 145mm; color:#536b80; }
+.hero { border-radius: 12pt; background:linear-gradient(135deg,#12364a,#087e79); color:white; padding:20pt; margin-top:18pt; }
+.hero strong { display:block; font-size:16pt; margin-bottom:5pt; }
+.hero p { margin:0; color:#e2f6f4; }
+.pill { display:inline-block; border:1px solid #b9d4db; border-radius:20pt; padding:3pt 8pt; margin:3pt 4pt 0 0; color:#31536a; font-size:8pt; }
+.footer { border-top:1px solid #d9e4e9; padding-top:6pt; color:#718698; font-size:8pt; }
+.page { page-break-after:always; }
+.page:last-child { page-break-after:auto; }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:9pt; }
+.card { border:1px solid #dce6eb; border-radius:8pt; padding:10pt; background:#fbfdfe; break-inside:avoid; }
+.card h3 { margin:0 0 5pt; }
+.card p:last-child { margin-bottom:0; }
+.flow { display:grid; grid-template-columns:1fr 24pt 1fr 24pt 1fr; align-items:center; text-align:center; margin:12pt 0; }
+.flow div { border:1px solid #c8dce0; border-radius:7pt; padding:10pt 6pt; background:#f4faf9; font-weight:700; color:#14545a; }
+.flow span { color:#087e79; font-weight:800; }
+table { width:100%; border-collapse:collapse; margin:8pt 0 12pt; font-size:9pt; }
+th { color:white; background:#17475a; text-align:left; }
+th,td { padding:6pt 7pt; border:1px solid #d6e1e7; vertical-align:top; }
+tr { break-inside:avoid; }
+code { font-family:Consolas,monospace; color:#0a6767; font-size:8.6pt; }
+.note { border-left:3px solid #0c9388; background:#eff9f7; padding:8pt 10pt; margin:10pt 0; }
+.shots { display:grid; grid-template-columns:1fr 1fr; gap:12pt; align-items:start; margin-top:10pt; }
+.shots figure { margin:0; text-align:center; }
+  .shots img { display:block; width:100%; height:198mm; object-fit:contain; object-position:top; border:1px solid #d6e1e7; border-radius:8pt; background:#f3f7fb; }
+.shots figcaption { margin-top:6pt; font-size:9pt; font-weight:700; color:#214559; }
+@media screen { body { max-width: 850px; margin: 40px auto; padding:0 30px; } .page,.cover { margin-bottom:50px; } }
+</style>
+</head>
+<body>
+<section class="cover">
+  <div><div class="brand">C% &nbsp; CCOverT</div><div style="height:48mm"></div><p class="kicker">System reference · 2026</p><h1>System<br>Documentation</h1><p class="lead">Internal design, application programming interfaces, services, and operational controls for the CCOverT coral-cover research workspace.</p>
+    <div class="hero"><strong>Annual live coral-cover projections</strong><p>Research workspace for Puerto Princesa City, Palawan. Users can explore prediction history and reports; researchers manage the shared model configuration; developers operate account and service controls.</p></div>
+  </div>
+  <div><span class="pill">React · TypeScript</span><span class="pill">Express API</span><span class="pill">FastAPI model</span><span class="pill">MongoDB</span><p class="footer" style="margin-top:18pt">Prepared from the application source and repository documentation. Deployment configuration values and credentials are intentionally excluded.</p></div>
+</section>
+<section class="page">
+  <p class="kicker">01 · Internal Design</p><h2>System architecture</h2>
+  <p>CCOverT separates the browser experience, authenticated application API, numerical model boundary, and persistent storage. The browser calls the Express API under <code>/api/v1</code>. The Python model service is an internal service and is not exposed to the browser.</p>
+  <div class="flow"><div>React web client<br><small>Vite build · Nginx</small></div><span>→</span><div>Express API<br><small>Sessions · role checks</small></div><span>→</span><div>Model + database<br><small>FastAPI · MongoDB</small></div></div>
+  <div class="grid">
+    <article class="card"><h3>Client workspace</h3><p>Runs authorized predictions, reviews annual outputs and computation details, views personal history, and creates evidence-based reports.</p></article>
+    <article class="card"><h3>Researcher workspace</h3><p>Maintains one active shared model configuration. Parameter changes require a source or rationale and are used by later client predictions.</p></article>
+    <article class="card"><h3>Developer workspace</h3><p>Manages accounts, system announcement, email configuration, backups, and operational status. Secret values are not displayed.</p></article>
+    <article class="card"><h3>Model and evidence</h3><p>FastAPI owns numerical calculations. Prediction records retain their input, model version, source coverage, warnings, and year-by-year computation values.</p></article>
+  </div>
+  <h3>Prediction flow</h3><ol><li>The verified user submits a profile, baseline, horizon, study area, and any selected source data.</li><li>The API validates access and inputs, resolves the active configuration, and calls the private model service.</li><li>The model returns the annual series and decomposition; the API stores the result and provenance for the account.</li><li>The browser renders the result and offers authorized history and report downloads.</li></ol>
+  <div class="note"><strong>Profiles:</strong> Paper uses the active configuration and refuses a run when required values are missing. Scenario runs require explicit, reasoned assumptions. Demo uses synthetic values and is disabled in production.</div>
+</section>
+<section class="page">
+  <p class="kicker">02 · Application Programming Interfaces (API)</p><h2>Browser API reference</h2>
+  <p><strong>Base path:</strong> <code>/api/v1</code>. Requests use JSON unless a route accepts a multipart file. Session-authenticated browser requests include the HttpOnly session cookie. Mutations also apply same-origin checks.</p>
+  <table><thead><tr><th>Area</th><th>Routes</th><th>Purpose / access</th></tr></thead><tbody>
+  <tr><td>Authentication</td><td><code>POST /auth/signup</code>, <code>/auth/verify</code>, <code>/auth/login</code>, <code>/auth/logout</code>, <code>/auth/forgot-password</code>, <code>/auth/reset-password</code>; <code>GET /auth/me</code></td><td>Account creation and verification, session lifecycle, password recovery, current user.</td></tr>
+  <tr><td>Predictions</td><td><code>POST /predictions</code>; <code>GET /predictions</code>, <code>/predictions/:id</code>, <code>/predictions/:id/download</code>, <code>/predictions/:id/reports</code></td><td>Verified user runs; owned records and downloads in Markdown, CSV, or JSON. Supports <code>Idempotency-Key</code>.</td></tr>
+  <tr><td>Model</td><td><code>GET /model/status</code>, <code>/conditions</code>, <code>/parameters</code>, <code>/versions</code>; <code>PUT /model/configuration</code>; version review/activation routes</td><td>Read model readiness and parameter values; researcher changes shared configuration; role checks apply to writes.</td></tr>
+  <tr><td>Data imports</td><td><code>GET /data-imports</code>, <code>/schema/:kind</code>; <code>POST /data-imports</code>, <code>/:id/estimate-g</code></td><td>Researcher-owned sourced SST, tourism, and coral-cover data; admin reviews as configured.</td></tr>
+  <tr><td>AI reports and uploads</td><td><code>GET /ai/status</code>, <code>GET/POST /ai/reports</code>; <code>GET/POST/DELETE /uploads</code></td><td>Reports from selected authorized evidence; private user uploads with bounded formats and size.</td></tr>
+  <tr><td>Settings and operations</td><td><code>PATCH /settings</code>; <code>GET /developer/status</code>, <code>PATCH /developer/config</code>, <code>PATCH /developer/smtp</code>, account and backup routes</td><td>User preferences; admin-only operational configuration, account administration, and backups.</td></tr>
+  </tbody></table>
+  <h3>Response and failure behavior</h3><p>Validation failures use HTTP 400; oversized uploads use 413; rate limits use 429. Errors include a stable code, message, optional details, and request ID. A prediction is not stored when the request is refused or model execution fails. A repeated idempotency key with a changed body returns a conflict.</p>
+  <div class="note">The internal model API is a separate service boundary. It requires the shared <code>x-service-token</code> header except health probes; it is not part of the public browser API.</div>
+</section>
+<section class="page">
+  <p class="kicker">03 · Services</p><h2>Runtime services</h2>
+  <table><thead><tr><th>Service</th><th>Technology</th><th>Responsibility and boundary</th></tr></thead><tbody>
+  <tr><td>Web</td><td>React, TypeScript, Vite, Nginx</td><td>Public landing, sign-in, and responsive client/researcher/developer screens. Container listens on port 80; Compose binds host port 8088 to loopback by default.</td></tr>
+  <tr><td>API</td><td>Node.js, Express</td><td>Authentication, authorization, validation, persistence, prediction orchestration, report generation, and operational routes. Container listens on port 4000.</td></tr>
+  <tr><td>Model</td><td>Python, FastAPI</td><td>Numerical calculation, model validation and calibration. Container listens on port 8000 on the private backend network.</td></tr>
+  <tr><td>Database</td><td>MongoDB 7</td><td>Users, configuration versions, predictions, source records, reports, and other application state. Compose attaches a persistent named volume.</td></tr>
+  <tr><td>Mail</td><td>Configured SMTP provider</td><td>Verification and password recovery messages. Production credentials stay in environment configuration.</td></tr>
+  <tr><td>Optional providers</td><td>AI and environmental integrations</td><td>Can provide evidence interpretation or environmental data. AI cannot change numerical prediction output; deterministic reports are used when no provider is configured.</td></tr>
+  </tbody></table>
+  <h3>Health and readiness</h3><p>The API exposes <code>/health</code>, <code>/ready</code>, and admin-protected <code>/metrics</code>. The model exposes <code>/health</code> and <code>/ready</code>. Container health checks gate startup dependencies for the local Compose stack.</p>
+  <p>The Compose file places MongoDB and the model service on an internal backend network. The API connects to both networks; only the web container publishes a loopback-bound host port by default. Production proxy and domain routing are deployment-specific.</p>
+</section>
+<section class="page">
+  <p class="kicker">04 · Controls</p><h2>Access, data, and operational controls</h2>
+  <div class="grid">
+    <article class="card"><h3>Authentication</h3><p>Session cookie is HttpOnly. Email verification gates prediction and evidence features for client accounts. Password reset tokens are single use and responses do not reveal whether an email exists.</p></article>
+    <article class="card"><h3>Role authorization</h3><p>Client, researcher, and admin routes apply server-side role checks. The server derives the account from the session; it does not trust a client-supplied user ID.</p></article>
+    <article class="card"><h3>Record ownership</h3><p>Prediction, upload, dataset, and report reads and updates are scoped to the authenticated user or authorized role. Upload bytes are private and are not served by the web app.</p></article>
+    <article class="card"><h3>Request safeguards</h3><p>Schema validation, same-origin checks for mutations, rate limits, bounded JSON and file sizes, password controls, and idempotent prediction submissions reduce accidental or unauthorized changes.</p></article>
+    <article class="card"><h3>Model provenance</h3><p>Each saved run records its input snapshot, configuration version, source records, equation/model versions, warnings, and annual computation decomposition. Assumptions are labeled and remain unreviewed.</p></article>
+    <article class="card"><h3>Secrets and backups</h3><p>Session, model, SMTP, CAPTCHA, and provider secrets are environment-managed. Admin backup actions and verification are available; operational secrets are not exposed in the UI.</p></article>
+  </div>
+  <h3>Configuration responsibilities</h3><p>Use <code>.env.example</code> as the variable inventory. Production requires HTTPS origins, a strong session secret, a model service token, persistent database configuration, and non-production demo settings disabled. Keep live credentials in a deployment secret store or ignored environment file.</p>
+</section>
+<section class="page">
+  <p class="kicker">05 · Mobile Screenshots</p><h2>System pages · mobile view</h2>
+  <p>The following pages were captured from the local application at a 480 × 900 CSS-pixel viewport. The landing page is public. The login screen is the unauthenticated entry to protected workspaces; no user data is present in these captures.</p>
+  <div class="shots">
+    <figure><img src="system-screenshots/mobile-home.png"><figcaption>Public system landing page · mobile viewport</figcaption></figure>
+    <figure><img src="system-screenshots/mobile-login.png"><figcaption>Sign-in page · mobile viewport</figcaption></figure>
+  </div>
+  <p class="footer" style="margin-top:16pt">CCOverT · System Documentation · Generated from the repository source and docs. Exact runtime status depends on the deployed environment.</p>
+</section>
+</body>
+</html>

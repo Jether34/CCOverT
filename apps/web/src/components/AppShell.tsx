@@ -2,12 +2,28 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const navItems = [
+type NavItem = { to: string; label: string; icon: string; end?: boolean };
+
+const clientNavItems: NavItem[] = [
   { to: '/home', label: 'Dashboard', icon: 'dashboard', end: true },
   { to: '/predict', label: 'Predict', icon: 'query_stats' },
   { to: '/history', label: 'History', icon: 'history' },
   { to: '/ai', label: 'Reports', icon: 'auto_awesome' },
   { to: '/guide', label: 'Guide and FAQ', icon: 'help_outline' },
+  { to: '/settings', label: 'Settings', icon: 'settings' }
+];
+
+const researcherNavItems: NavItem[] = [
+  { to: '/home', label: 'Model workspace', icon: 'dashboard', end: true },
+  { to: '/model', label: 'Model settings', icon: 'tune' },
+  { to: '/history', label: 'History', icon: 'history' },
+  { to: '/ai', label: 'Reports', icon: 'auto_awesome' },
+  { to: '/guide', label: 'Guide and FAQ', icon: 'help_outline' },
+  { to: '/settings', label: 'Settings', icon: 'settings' }
+];
+
+const adminNavItems: NavItem[] = [
+  { to: '/developer', label: 'Operations', icon: 'admin_panel_settings' },
   { to: '/settings', label: 'Settings', icon: 'settings' }
 ];
 
@@ -45,6 +61,7 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
   const toggleTheme = (): void => {
     if (user) void updatePreferences({ ...user.preferences, theme: user.preferences.theme === 'dark' ? 'light' : 'dark' });
   };
+  const navItems = user?.role === 'admin' ? adminNavItems : user?.role === 'researcher' ? researcherNavItems : clientNavItems;
   return (
     <div className="app-frame">
       <header className="site-header app-header">
