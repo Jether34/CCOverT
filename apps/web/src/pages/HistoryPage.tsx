@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { AiReport, PredictionRecord } from '@ccovert/shared';
 import { SCENARIO_LABEL } from '@ccovert/shared';
@@ -16,6 +16,7 @@ export function HistoryPage(): JSX.Element {
   const [reports, setReports] = useState<AiReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const detailScrollRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -52,6 +53,10 @@ export function HistoryPage(): JSX.Element {
       predictionsApi.get(selectedId).then(({ prediction }) => setSelected(prediction)).catch(() => setSelected(null));
     }
   }, [records, selected, selectedId, setParams]);
+
+  useEffect(() => {
+    if (detailScrollRef.current) detailScrollRef.current.scrollTop = 0;
+  }, [selected?.predictionId]);
 
   return (
     <AppShell>
@@ -111,7 +116,7 @@ export function HistoryPage(): JSX.Element {
                     <Link className="button button-small button-primary" to={`/ai?prediction=${selected.predictionId}`}>Generate report</Link>
                   </div>
                 </div>
-                <div className="history-detail-scroll">
+                <div className="history-detail-scroll" ref={detailScrollRef}>
                 <p className="muted">Request id {selected.requestId}. Configuration {selected.modelConfigVersion}. Created {new Date(selected.createdAt).toLocaleString()}.</p>
                 {selected.isDemo && <Notice tone="danger" title="Synthetic DEMO run">This result used synthetic alpha and g values. It must never be cited as a finding.</Notice>}
                 {selected.isScenario && <Notice tone="danger" title={SCENARIO_LABEL}>This run substituted analyst-assumed values for parameters the paper does not publish. It is excluded from validated counts and must not be cited as a finding.</Notice>}

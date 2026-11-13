@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { AiReport, PredictionRecord } from '@ccovert/shared';
 import { aiApi, getErrorMessage, predictionsApi } from '../lib/api';
@@ -12,6 +12,7 @@ export function AiPage(): JSX.Element {
   const [reports, setReports] = useState<AiReport[]>([]);
   const [selectedPredictions, setSelectedPredictions] = useState<string[]>(params.get('prediction') ? [params.get('prediction') as string] : []);
   const [active, setActive] = useState<AiReport | null>(null);
+  const reportContentRef = useRef<HTMLDivElement>(null);
   const [reportExpanded, setReportExpanded] = useState(true);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -22,6 +23,10 @@ export function AiPage(): JSX.Element {
   }, []);
 
   useEffect(load, [load]);
+
+  useEffect(() => {
+    if (reportContentRef.current) reportContentRef.current.scrollTop = 0;
+  }, [active?.id]);
 
   const toggle = (values: string[], value: string, setter: (next: string[]) => void): void => {
     setter(values.includes(value) ? values.filter((candidate) => candidate !== value) : [...values, value]);
@@ -106,7 +111,7 @@ export function AiPage(): JSX.Element {
                   {active.model ? ` (${active.model})` : ''} on {new Date(active.createdAt).toLocaleString()}
                 </p>
                 {reportExpanded && <WarningList warnings={active.warnings} title="Report warnings" />}
-                {reportExpanded && <div className="report-content">
+                {reportExpanded && <div className="report-content" ref={reportContentRef}>
                   {active.body.split('\n').map((line, index) => (
                     line.startsWith('# ') || line.startsWith('## ')
                       ? <h3 key={index}>{line.replace(/^#+ /, '')}</h3>
