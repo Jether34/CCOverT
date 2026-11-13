@@ -105,7 +105,29 @@ code { font-family:Consolas,monospace; color:#0a6767; font-size:8.6pt; }
   <h3>Configuration responsibilities</h3><p>Use <code>.env.example</code> as the variable inventory. Production requires HTTPS origins, a strong session secret, a model service token, persistent database configuration, and non-production demo settings disabled. Keep live credentials in a deployment secret store or ignored environment file.</p>
 </section>
 <section class="page">
-  <p class="kicker">05 · Mobile Screenshots</p><h2>System pages · mobile view</h2>
+  <p class="kicker">05 · Interface Inventory</p><h2>System routes and mobile capture coverage</h2>
+  <p>This inventory is taken from the web application's route definitions. “Not captured” means this documentation has no verified mobile emulator screenshot for that route.</p>
+  <table><thead><tr><th>Interface</th><th>Route</th><th>Access</th><th>Mobile capture</th></tr></thead><tbody>
+  <tr><td>Public landing</td><td><code>/</code></td><td>Public</td><td>Deployed Android emulator</td></tr>
+  <tr><td>Sign up</td><td><code>/signup</code></td><td>Public</td><td>Not captured</td></tr>
+  <tr><td>Log in</td><td><code>/login</code></td><td>Public</td><td>Prior local capture only</td></tr>
+  <tr><td>Email verification</td><td><code>/verify</code></td><td>Public, token flow</td><td>Not captured</td></tr>
+  <tr><td>Forgot password</td><td><code>/forgot-password</code></td><td>Public</td><td>Not captured</td></tr>
+  <tr><td>Reset password</td><td><code>/reset-password</code></td><td>Public, token flow</td><td>Not captured</td></tr>
+  <tr><td>Role home</td><td><code>/home</code></td><td>Signed in</td><td>Not captured</td></tr>
+  <tr><td>Prediction</td><td><code>/predict</code></td><td>Verified account</td><td>Not captured</td></tr>
+  <tr><td>History</td><td><code>/history</code></td><td>Verified account</td><td>Not captured</td></tr>
+  <tr><td>Model configuration</td><td><code>/model</code></td><td>Researcher</td><td>Not captured</td></tr>
+  <tr><td>Researcher workspace</td><td><code>/researcher</code></td><td>Researcher</td><td>Not captured</td></tr>
+  <tr><td>Developer controls</td><td><code>/developer</code></td><td>Admin</td><td>Not captured</td></tr>
+  <tr><td>AI reports</td><td><code>/ai</code></td><td>Verified account</td><td>Not captured</td></tr>
+  <tr><td>Settings</td><td><code>/settings</code></td><td>Signed in</td><td>Not captured</td></tr>
+  <tr><td>Guide and FAQ</td><td><code>/guide</code></td><td>Signed in</td><td>Not captured</td></tr>
+  </tbody></table>
+  <div class="note">Coverage is incomplete: only the public landing page has a deployed emulator capture in this edition. The page screenshots requested for the remaining routes have not been produced.</div>
+</section>
+<section class="page">
+  <p class="kicker">06 · Mobile Screenshots</p><h2>System pages · mobile view</h2>
   <p>The deployed public landing page was captured in the Android emulator at 1224 × 2720 pixels, 440 dpi. The sign-in screenshot below is from the earlier local capture at a 480 × 900 CSS-pixel viewport. Authenticated and remaining account pages still need emulator captures.</p>
   <div class="shots">
     <figure><img src="system-screenshots/emulator-home.png"><figcaption>Deployed public landing page · Android emulator · 1224 × 2720 px · 440 dpi</figcaption></figure>
