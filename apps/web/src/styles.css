@@ -882,3 +882,58 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
   .ai-page .ai-library { grid-column: 1 / -1; }
   .ai-page .ai-library-list { grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); max-height: none; overflow: visible; }
 }
+
+/* Make the three authentication screens feel centered on a phone while still
+   allowing taller forms to scroll on short viewports. */
+@media (max-width: 680px) {
+  .auth-page { min-height: 100svh; grid-template-rows: 1fr; align-content: center; place-items: center; padding: max(.75rem, env(safe-area-inset-top)) .75rem max(.75rem, env(safe-area-inset-bottom)); overflow-y: auto; }
+  .auth-card { width: min(100%, 24rem); margin: auto 0; }
+}
+
+/* History and prediction workspaces use a calmer hierarchy on desktop. */
+@media (min-width: 901px) {
+  .history-page { grid-template-columns: minmax(18rem, .72fr) minmax(0, 1.68fr); gap: 1.15rem; }
+  .history-page:not(:has(#prediction-detail)) > section.panel:first-of-type { grid-column: 1 / -1; max-width: 58rem; }
+  .history-page > section.panel:first-of-type { position: sticky; top: 5.6rem; align-self: start; max-height: calc(100vh - 7rem); padding: 1.05rem; overflow: hidden; }
+  .history-page > section.panel:first-of-type .record-list { max-height: calc(100vh - 13rem); gap: .55rem; padding-right: .2rem; }
+  .history-page > #prediction-detail { padding: 1.25rem; }
+  .history-page > #prediction-detail > .panel-heading { align-items: center; flex-wrap: wrap; gap: .8rem 1.25rem; padding-bottom: .95rem; border-bottom: 1px solid var(--line); }
+  .history-page > #prediction-detail > .panel-heading > div:first-child { min-width: 15rem; }
+  .history-page > #prediction-detail .button-row { justify-content: flex-end; flex-wrap: wrap; gap: .45rem; }
+  .history-page > #prediction-detail .history-detail-scroll { max-height: calc(100vh - 14rem); overflow: auto; padding: .25rem .35rem .25rem 0; }
+  .history-detail-scroll > .muted { overflow-wrap: anywhere; margin: .85rem 0; border-radius: .65rem; padding: .7rem .85rem; background: var(--surface-2); font-size: .78rem; }
+  .history-detail-scroll > .detail-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin: .9rem 0 1.25rem; }
+  .history-detail-scroll > .detail-list div { display: grid; align-content: start; gap: .35rem; min-width: 0; min-height: 4.1rem; border: 1px solid var(--line); border-radius: .7rem; padding: .75rem; background: var(--surface-2); }
+  .history-detail-scroll > .detail-list dt { font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  .history-detail-scroll > .detail-list dd { overflow-wrap: anywhere; text-align: left; font-size: .86rem; line-height: 1.4; }
+  .history-detail-scroll h3 { margin-top: 1.35rem; }
+  .history-page .prediction-card { padding: .8rem; }
+  .history-page .prediction-number { margin: .35rem 0 .1rem; font-size: 2rem; }
+  .history-page .prediction-card p { margin-bottom: .45rem; font-size: .83rem; }
+  .history-page .card-meta { padding-top: .45rem; font-size: .68rem; }
+  .predict-page .prediction-layout { grid-template-columns: minmax(25rem, .76fr) minmax(0, 1.24fr); gap: 1.2rem; align-items: start; }
+  .predict-page .form-panel, .predict-page .result-panel { min-height: 0; padding: 1.35rem; }
+  .predict-page .form-panel > fieldset { display: flex; flex-direction: column; gap: .55rem; }
+  .predict-page .form-panel > fieldset > .panel-heading { margin-bottom: .25rem; padding-bottom: .8rem; border-bottom: 1px solid var(--line); }
+  .predict-page .form-panel label:not(.checkbox-field) { margin-bottom: .25rem; }
+  .predict-page .form-panel .form-hint { max-width: 72ch; }
+  .predict-page .prediction-window-fields { gap: .65rem .8rem; }
+  .predict-page .result-panel > .panel-heading { padding-bottom: .8rem; border-bottom: 1px solid var(--line); }
+  .predict-page .result-summary { grid-template-columns: minmax(0, 1.15fr) minmax(15rem, .85fr); gap: .75rem; margin: .65rem 0 1rem; }
+  .predict-page .result-final-cover, .predict-page .result-meta { border-radius: .8rem; }
+  .predict-page .result-final-cover { padding: 1rem; }
+  .predict-page .result-final-cover .prediction-number { font-size: 2.35rem; }
+  .predict-page .result-meta { padding: .85rem 1rem; }
+  .predict-page .prediction-table-heading { align-items: center; margin: 1rem 0 .55rem; }
+  .predict-page .annual-output-table tbody tr { gap: .3rem; padding: .55rem; background: var(--surface-2); }
+  .predict-page .annual-output-table tbody th, .predict-page .annual-output-table tbody td { padding: .35rem; font-size: .82rem; }
+}
+
+@media (min-width: 901px) and (max-width: 1250px) {
+  .history-page { grid-template-columns: minmax(16rem, .8fr) minmax(0, 1.3fr); }
+  .history-page > #prediction-detail > .panel-heading { align-items: flex-start; }
+  .history-page > #prediction-detail .button-row { justify-content: flex-start; }
+  .history-detail-scroll > .detail-list { grid-template-columns: 1fr; }
+  .predict-page .prediction-layout { grid-template-columns: minmax(21rem, .8fr) minmax(0, 1.2fr); }
+  .predict-page .result-summary { grid-template-columns: 1fr; }
+}
